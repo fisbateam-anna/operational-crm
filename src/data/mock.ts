@@ -1,0 +1,3396 @@
+import type {
+  AppData,
+  AuditLog,
+  BusinessDocument,
+  Communication,
+  Counterparty,
+  Dictionary,
+  InternalHandoff,
+  IntegrationExchange,
+  NotificationEvent,
+  ProcessInstance,
+  ProcessTemplate,
+  RoleDefinition,
+  Task,
+  TaskTemplate,
+  User,
+  WikiPage
+} from '../types';
+
+export const roles: RoleDefinition[] = [
+  {
+    key: 'curator',
+    label: 'Куратор CRM',
+    userId: 'u-001',
+    workspace: 'Главная CRM',
+    description: 'Ведет юридических и физических лиц, запускает процессы, фиксирует коммуникации и контролирует сервисы.'
+  },
+  {
+    key: 'department',
+    label: 'Исполнитель подразделения',
+    userId: 'u-004',
+    workspace: 'Мои задачи',
+    description: 'Получает задачи из процессов, исполняет этапы и передает работу дальше по маршруту.'
+  },
+  {
+    key: 'owner',
+    label: 'Руководитель процесса',
+    userId: 'u-006',
+    workspace: 'Контроль процессов',
+    description: 'Контролирует сроки, нагрузку подразделений, эскалации и качество исполнения процессов.'
+  },
+  {
+    key: 'admin',
+    label: 'Администратор BPM',
+    userId: 'u-008',
+    workspace: 'Настройка системы',
+    description: 'Управляет шаблонами, справочниками, правилами, интеграциями и структурой логов.'
+  }
+];
+
+const users: User[] = [
+  {
+    id: 'u-001',
+    maskedId: 'USR-1842',
+    name: 'Елена Морозова',
+    role: 'curator',
+    department: 'Дирекция сопровождения участников ПС МИР',
+    email: 'morozova@example.corp'
+  },
+  {
+    id: 'u-002',
+    maskedId: 'USR-2671',
+    name: 'Алексей Фомин',
+    role: 'curator',
+    department: 'Дирекция развития СБП',
+    email: 'fomin@example.corp'
+  },
+  {
+    id: 'u-003',
+    maskedId: 'USR-3188',
+    name: 'Мария Лебедева',
+    role: 'curator',
+    department: 'Партнерские программы',
+    email: 'lebedeva@example.corp'
+  },
+  {
+    id: 'u-004',
+    maskedId: 'USR-4094',
+    name: 'Дмитрий Орлов',
+    role: 'department',
+    department: 'Технологическая интеграция',
+    email: 'orlov@example.corp'
+  },
+  {
+    id: 'u-005',
+    maskedId: 'USR-5120',
+    name: 'Светлана Павлова',
+    role: 'department',
+    department: 'Операционный контроль',
+    email: 'pavlova@example.corp'
+  },
+  {
+    id: 'u-006',
+    maskedId: 'USR-6019',
+    name: 'Игорь Казаков',
+    role: 'owner',
+    department: 'Офис управления процессами',
+    email: 'kazakov@example.corp'
+  },
+  {
+    id: 'u-007',
+    maskedId: 'USR-7093',
+    name: 'Наталья Соколова',
+    role: 'department',
+    department: 'Юридическое сопровождение',
+    email: 'sokolova@example.corp'
+  },
+  {
+    id: 'u-008',
+    maskedId: 'USR-8007',
+    name: 'Павел Андреев',
+    role: 'admin',
+    department: 'Администрирование Целевой ИС',
+    email: 'andreev@example.corp'
+  }
+];
+
+const counterparties: Counterparty[] = [
+  {
+    id: 'КО-000184',
+    name: 'АО "Северный Расчетный Банк"',
+    shortName: 'СРБ',
+    type: 'КО',
+    status: 'Активен',
+    inn: '5408123456',
+    kpp: '540801001',
+    ogrn: '1025400001840',
+    region: 'Новосибирская область',
+    address: '630099, Новосибирск, Красный проспект, 22',
+    curatorId: 'u-001',
+    segment: 'Участник ПС МИР',
+    riskScore: 18,
+    lastTouch: '2026-08-01T12:30:00+07:00',
+    nextControlDate: '2026-08-09',
+    officialRequests: 2,
+    penalties: 0,
+    departments: ['Технологическая интеграция', 'Операционный контроль', 'Партнерские программы'],
+    services: [
+      {
+        service: 'ПС МИР',
+        status: 'Подключен',
+        stage: 'Промышленная эксплуатация',
+        connectedAt: '2021-03-18',
+        ownerDepartment: 'Операционный контроль',
+        incidentCount: 1,
+        monthlyOperations: 4820000,
+        slaHours: 24
+      },
+      {
+        service: 'СБП',
+        status: 'Подключается',
+        stage: 'Тестовый контур',
+        ownerDepartment: 'Технологическая интеграция',
+        incidentCount: 0,
+        monthlyOperations: 0,
+        slaHours: 16
+      },
+      {
+        service: 'Программа лояльности',
+        status: 'Пилот',
+        stage: 'Маркетинговая акция согласована',
+        ownerDepartment: 'Партнерские программы',
+        incidentCount: 0,
+        monthlyOperations: 143000,
+        slaHours: 48
+      }
+    ],
+    contacts: [
+      {
+        id: 'c-001',
+        name: 'Анна Воронцова',
+        position: 'Директор по операционному взаимодействию',
+        phone: '+7 383 222-18-40',
+        email: 'a.vorontsova@srb.example',
+        primary: true
+      },
+      {
+        id: 'c-002',
+        name: 'Петр Савин',
+        position: 'Руководитель ИТ-интеграции',
+        phone: '+7 383 222-18-41',
+        email: 'p.savin@srb.example'
+      }
+    ]
+  },
+  {
+    id: 'КО-000219',
+    name: 'ПАО "Восточный Клиринговый Центр"',
+    shortName: 'ВКЦ',
+    type: 'КО',
+    status: 'Риск',
+    inn: '2536019870',
+    kpp: '253601001',
+    ogrn: '1042500002194',
+    region: 'Приморский край',
+    address: '690091, Владивосток, Светланская, 31',
+    curatorId: 'u-001',
+    segment: 'Участник ПС МИР',
+    riskScore: 73,
+    lastTouch: '2026-07-29T17:45:00+07:00',
+    nextControlDate: '2026-08-04',
+    officialRequests: 5,
+    penalties: 1,
+    departments: ['Операционный контроль', 'Юридическое сопровождение', 'Технологическая интеграция'],
+    services: [
+      {
+        service: 'ПС МИР',
+        status: 'Подключен',
+        stage: 'Промышленная эксплуатация',
+        connectedAt: '2019-11-26',
+        ownerDepartment: 'Операционный контроль',
+        incidentCount: 6,
+        monthlyOperations: 3590000,
+        slaHours: 24
+      },
+      {
+        service: 'СБП',
+        status: 'Приостановлен',
+        stage: 'Предписание по тестовым сценариям',
+        connectedAt: '2024-05-10',
+        ownerDepartment: 'Технологическая интеграция',
+        incidentCount: 4,
+        monthlyOperations: 1280000,
+        slaHours: 8
+      }
+    ],
+    contacts: [
+      {
+        id: 'c-003',
+        name: 'Ольга Шестакова',
+        position: 'Заместитель председателя правления',
+        phone: '+7 423 240-09-18',
+        email: 'o.shestakova@vkc.example',
+        primary: true
+      }
+    ]
+  },
+  {
+    id: 'ПР-000077',
+    name: 'ООО "Городские Транспортные Сервисы"',
+    shortName: 'ГТС',
+    type: 'Партнер',
+    status: 'Подключение',
+    inn: '7705456712',
+    kpp: '770501001',
+    ogrn: '1167746000770',
+    region: 'Москва',
+    address: '115035, Москва, Садовническая, 14',
+    curatorId: 'u-003',
+    segment: 'Транспортная процессинговая платформа',
+    riskScore: 41,
+    lastTouch: '2026-08-02T10:20:00+07:00',
+    nextControlDate: '2026-08-07',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Технологическая интеграция', 'Юридическое сопровождение', 'Партнерские программы'],
+    services: [
+      {
+        service: 'Транспортная платформа',
+        status: 'Подключается',
+        stage: 'Проверка API-паспорта',
+        ownerDepartment: 'Технологическая интеграция',
+        incidentCount: 0,
+        monthlyOperations: 0,
+        slaHours: 12
+      },
+      {
+        service: 'Программа лояльности',
+        status: 'На проверке',
+        stage: 'Расчет бюджета акции',
+        ownerDepartment: 'Партнерские программы',
+        incidentCount: 0,
+        monthlyOperations: 0,
+        slaHours: 24
+      }
+    ],
+    contacts: [
+      {
+        id: 'c-004',
+        name: 'Кирилл Мельников',
+        position: 'Директор по продукту',
+        phone: '+7 495 718-20-77',
+        email: 'k.melnikov@gts.example',
+        primary: true
+      }
+    ]
+  },
+  {
+    id: 'ТСП-000311',
+    name: 'ООО "Сеть Маркетов Север"',
+    shortName: 'СМС',
+    type: 'ТСП',
+    status: 'Пилот',
+    inn: '7806420311',
+    kpp: '780601001',
+    ogrn: '1187847003111',
+    region: 'Санкт-Петербург',
+    address: '195027, Санкт-Петербург, Магнитогорская, 17',
+    curatorId: 'u-003',
+    segment: 'Партнер Программы лояльности',
+    riskScore: 29,
+    lastTouch: '2026-08-03T15:10:00+07:00',
+    nextControlDate: '2026-08-12',
+    officialRequests: 0,
+    penalties: 0,
+    departments: ['Партнерские программы', 'Операционный контроль'],
+    services: [
+      {
+        service: 'Программа лояльности',
+        status: 'Пилот',
+        stage: 'Запуск акции "Кешбэк выходного дня"',
+        ownerDepartment: 'Партнерские программы',
+        incidentCount: 0,
+        monthlyOperations: 87000,
+        slaHours: 48
+      }
+    ],
+    contacts: [
+      {
+        id: 'c-005',
+        name: 'Виктория Синицына',
+        position: 'Руководитель CRM-маркетинга',
+        phone: '+7 812 677-03-11',
+        email: 'v.sinitsyna@sms.example',
+        primary: true
+      }
+    ]
+  },
+  {
+    id: 'ПСП-000052',
+    name: 'АО "Платежная система Контур"',
+    shortName: 'ПС Контур',
+    type: 'ПСП',
+    status: 'Активен',
+    inn: '7701800052',
+    kpp: '770101001',
+    ogrn: '1107746000528',
+    region: 'Москва',
+    address: '101000, Москва, Мясницкая, 24',
+    curatorId: 'u-002',
+    segment: 'Платежная система - партнер',
+    riskScore: 22,
+    lastTouch: '2026-07-30T11:05:00+07:00',
+    nextControlDate: '2026-08-18',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Операционный контроль', 'Технологическая интеграция'],
+    services: [
+      {
+        service: 'МПС',
+        status: 'Подключен',
+        stage: 'Промышленный обмен',
+        connectedAt: '2020-09-01',
+        ownerDepartment: 'Операционный контроль',
+        incidentCount: 2,
+        monthlyOperations: 2140000,
+        slaHours: 24
+      }
+    ],
+    contacts: [
+      {
+        id: 'c-006',
+        name: 'Роман Ковалев',
+        position: 'Директор по операционным сервисам',
+        phone: '+7 495 540-00-52',
+        email: 'r.kovalev@konturps.example',
+        primary: true
+      }
+    ]
+  },
+  {
+    id: 'НКО-000143',
+    name: 'НКО "Быстрый перевод"',
+    shortName: 'Быстрый перевод',
+    type: 'НКО',
+    status: 'Подключение',
+    inn: '7709143143',
+    kpp: '770901001',
+    ogrn: '1137700014300',
+    region: 'Москва',
+    address: '109028, Москва, Покровский бульвар, 6',
+    curatorId: 'u-002',
+    segment: 'Участник СБП',
+    riskScore: 35,
+    lastTouch: '2026-08-04T09:00:00+07:00',
+    nextControlDate: '2026-08-06',
+    officialRequests: 3,
+    penalties: 0,
+    departments: ['Технологическая интеграция', 'Операционный контроль'],
+    services: [
+      {
+        service: 'СБП',
+        status: 'Подключается',
+        stage: 'Подготовка тестового стенда',
+        ownerDepartment: 'Технологическая интеграция',
+        incidentCount: 0,
+        monthlyOperations: 0,
+        slaHours: 8
+      }
+    ],
+    contacts: [
+      {
+        id: 'c-007',
+        name: 'Тимур Галиев',
+        position: 'Начальник процессингового центра',
+        phone: '+7 495 901-43-00',
+        email: 't.galiev@fastpay.example',
+        primary: true
+      }
+    ]
+  }
+];
+
+const taskTemplates: TaskTemplate[] = [
+  {
+    id: 'tt-verify-profile',
+    name: 'Проверить единый профиль контрагента',
+    entityType: 'Контрагент',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Реквизиты', 'Контакты', 'Связанные сервисы'],
+    slaHours: 8,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена', 'Отменена']
+  },
+  {
+    id: 'tt-api-passport',
+    name: 'Проверить API-паспорт и тестовый контур',
+    entityType: 'Процесс подключения',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Технологическая интеграция',
+    requiredFields: ['API-паспорт', 'Тестовый стенд', 'Контакт ИТ'],
+    slaHours: 16,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-legal-notice',
+    name: 'Подготовить уведомление по нарушению SLA',
+    entityType: 'Уведомление/штраф',
+    defaultPriority: 'Критичный',
+    assigneeGroup: 'Юридическое сопровождение',
+    requiredFields: ['Основание', 'Расчет нарушения', 'Получатель'],
+    slaHours: 12,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена', 'Отменена']
+  },
+  {
+    id: 'tt-marketing-budget',
+    name: 'Согласовать параметры маркетинговой акции',
+    entityType: 'Маркетинговая акция',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Партнерские программы',
+    requiredFields: ['Период акции', 'Бюджет', 'Механика начисления'],
+    slaHours: 24,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-marketing-launch-control',
+    name: 'Проконтролировать запуск маркетинговой акции',
+    entityType: 'Маркетинговая акция',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Дата старта акции', 'Готовность каналов', 'Метрики первого дня'],
+    slaHours: 24,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-launch-control',
+    name: 'Провести контроль промышленного запуска',
+    entityType: 'Процесс подключения',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Дата запуска', 'Метрики первого дня', 'Ответственный контрагента'],
+    slaHours: 24,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Выполнена']
+  },
+  {
+    id: 'tt-penalty-response-control',
+    name: 'Проконтролировать реакцию контрагента на уведомление',
+    entityType: 'Уведомление/штраф',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Ответ контрагента', 'План корректирующих действий', 'Решение по штрафу'],
+    slaHours: 24,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-appeal-classify',
+    name: 'Классифицировать обращение клиента',
+    entityType: 'Клиентское обращение',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Контактный центр',
+    requiredFields: ['Категория обращения', 'Канал обращения', 'Согласие ПДн'],
+    slaHours: 4,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-appeal-resolution',
+    name: 'Проверить обращение и подготовить решение',
+    entityType: 'Клиентское обращение',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Причина обращения', 'Решение', 'Срок ответа клиенту'],
+    slaHours: 16,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-satisfaction-control',
+    name: 'Закрыть обращение и проверить удовлетворенность',
+    entityType: 'Клиентское обращение',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Контактный центр',
+    requiredFields: ['Итоговый ответ', 'Оценка клиента', 'Причина закрытия'],
+    slaHours: 8,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Выполнена', 'Отменена']
+  },
+  {
+    id: 'tt-profile-actualization',
+    name: 'Проверить состав данных профиля',
+    entityType: 'Актуализация данных',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Реквизиты или документ', 'Контакты', 'Согласия'],
+    slaHours: 8,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-consent-refresh',
+    name: 'Запросить подтверждение данных и согласий',
+    entityType: 'Актуализация данных',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Контактный центр',
+    requiredFields: ['Канал запроса', 'Подтверждение клиента', 'Срок действия согласия'],
+    slaHours: 24,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'Выполнена']
+  },
+  {
+    id: 'tt-profile-publish',
+    name: 'Опубликовать изменения профиля в целевых системах',
+    entityType: 'Актуализация данных',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Администрирование Целевой ИС',
+    requiredFields: ['Результат DWH', 'Журналирование', 'Контроль дублей'],
+    slaHours: 8,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-legal-profile-check',
+    name: 'Проверить реквизиты и контактных лиц ЮЛ',
+    entityType: 'Актуализация данных ЮЛ',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['ИНН/КПП/ОГРН', 'Основной контакт', 'Связанные сервисы'],
+    slaHours: 8,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-legal-profile-request',
+    name: 'Запросить подтверждение реквизитов у ЮЛ',
+    entityType: 'Актуализация данных ЮЛ',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Адресат запроса', 'Подтвержденные реквизиты', 'Контрольный срок ответа'],
+    slaHours: 24,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'Выполнена']
+  },
+  {
+    id: 'tt-communication-followup',
+    name: 'Выполнить договоренности по коммуникации',
+    entityType: 'Коммуникация',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Итог коммуникации', 'Следующий шаг', 'Ответственный'],
+    slaHours: 24,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'Выполнена']
+  },
+  {
+    id: 'tt-internal-handoff',
+    name: 'Отработать межподразделенческое поручение',
+    entityType: 'Внутреннее взаимодействие',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Запрошенное действие', 'Результат подразделения', 'Комментарий для инициатора'],
+    slaHours: 16,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-contract-package',
+    name: 'Проверить договорной пакет и реквизиты',
+    entityType: 'Договорной процесс',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Реквизиты контрагента', 'Перечень сервисов', 'Контакт подписанта'],
+    slaHours: 8,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-contract-terms',
+    name: 'Согласовать договорные условия обслуживания',
+    entityType: 'Договорной процесс',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Юридическое сопровождение',
+    requiredFields: ['Тарифный пакет', 'SLA обслуживания', 'Ограничения и особые условия'],
+    slaHours: 16,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'На проверке', 'Выполнена']
+  },
+  {
+    id: 'tt-contract-signing',
+    name: 'Зафиксировать статус подписания договора',
+    entityType: 'Договорной процесс',
+    defaultPriority: 'Высокий',
+    assigneeGroup: 'Юридическое сопровождение',
+    requiredFields: ['Номер договора', 'Статус подписания в СЭД', 'Дата вступления в силу'],
+    slaHours: 12,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'Ожидание', 'Выполнена']
+  },
+  {
+    id: 'tt-contract-activation',
+    name: 'Активировать договорные параметры в CRM',
+    entityType: 'Договорной процесс',
+    defaultPriority: 'Средний',
+    assigneeGroup: 'Операционный контроль',
+    requiredFields: ['Карточка договора', 'Параметры сервиса', 'Контрольная дата'],
+    slaHours: 8,
+    statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена']
+  }
+];
+
+const processTemplates: ProcessTemplate[] = [
+  {
+    id: 'pt-connect-sbp',
+    name: 'Подключение контрагента к сервису СБП',
+    processType: 'Подключение сервиса',
+    partyKinds: ['ЮЛ'],
+    version: 4,
+    status: 'Актуальная',
+    trigger: 'Ручной запуск',
+    entityTypes: ['Юридическое лицо', 'Контрагент', 'Сервис', 'Задача', 'ЭВД'],
+    attributes: [
+      { id: 'attr-service', name: 'Сервис подключения', type: 'Справочник', required: true, source: 'Сервисы' },
+      { id: 'attr-target-date', name: 'Плановая дата запуска', type: 'Дата', required: true },
+      { id: 'attr-test-stand', name: 'Тестовый стенд готов', type: 'Да/Нет', required: true },
+      { id: 'attr-risk', name: 'Индекс риска', type: 'Формула', required: false, formula: 'просрочки * 15 + инциденты * 8 + штрафы * 20' }
+    ],
+    stages: [
+      {
+        id: 's-profile',
+        name: 'Проверка единого профиля',
+        department: 'Операционный контроль',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-verify-profile',
+        requiredAttributes: ['Реквизиты', 'Контакты'],
+        escalationRule: 'email куратору и руководителю при просрочке 2 часа'
+      },
+      {
+        id: 's-api',
+        name: 'Технологическая проверка',
+        department: 'Технологическая интеграция',
+        slaHours: 16,
+        autoTaskTemplateId: 'tt-api-passport',
+        requiredAttributes: ['API-паспорт', 'Тестовый стенд'],
+        escalationRule: 'внутрисистемное уведомление группе интеграции'
+      },
+      {
+        id: 's-launch',
+        name: 'Промышленный запуск',
+        department: 'Операционный контроль',
+        slaHours: 24,
+        autoTaskTemplateId: 'tt-launch-control',
+        requiredAttributes: ['Дата запуска', 'Метрики первого дня'],
+        escalationRule: 'уведомление владельцу процесса и групповому email'
+      }
+    ],
+    validationRules: [
+      'ИНН обязателен и проверяется на уникальность',
+      'Плановая дата запуска не может быть раньше текущей даты',
+      'На этапе запуска обязательно наличие валидированного API-паспорта'
+    ],
+    integrationRules: ['Синхронно проверить контрагента в СЭД', 'Передать событие запуска в DWH', 'Отправить email группе контрагента']
+  },
+  {
+    id: 'pt-marketing-campaign',
+    name: 'Запуск совместной маркетинговой акции',
+    processType: 'Маркетинговая акция',
+    partyKinds: ['ЮЛ'],
+    version: 2,
+    status: 'Актуальная',
+    trigger: 'Событие ИС',
+    entityTypes: ['Юридическое лицо', 'Контрагент', 'Маркетинговая акция', 'Задача'],
+    attributes: [
+      { id: 'attr-budget', name: 'Бюджет акции', type: 'Число', required: true },
+      { id: 'attr-mechanics', name: 'Механика начисления', type: 'Строка', required: true },
+      { id: 'attr-period', name: 'Период акции', type: 'Дата', required: true }
+    ],
+    stages: [
+      {
+        id: 's-budget',
+        name: 'Расчет и проверка бюджета',
+        department: 'Партнерские программы',
+        slaHours: 24,
+        autoTaskTemplateId: 'tt-marketing-budget',
+        requiredAttributes: ['Бюджет', 'Механика'],
+        escalationRule: 'уведомить руководителя партнерских программ'
+      },
+      {
+        id: 's-control',
+        name: 'Операционный контроль запуска',
+        department: 'Операционный контроль',
+        slaHours: 24,
+        autoTaskTemplateId: 'tt-marketing-launch-control',
+        requiredAttributes: ['Дата старта акции', 'Готовность каналов'],
+        escalationRule: 'эскалация в офис управления процессами'
+      }
+    ],
+    validationRules: ['Бюджет больше 0', 'Период акции не пересекается с архивной кампанией'],
+    integrationRules: ['Передать параметры акции в BI', 'Создать страницу итогов в Wiki']
+  },
+  {
+    id: 'pt-penalty-notice',
+    name: 'Выставление уведомления и штрафа контрагенту',
+    processType: 'Уведомление/штраф',
+    partyKinds: ['ЮЛ'],
+    version: 3,
+    status: 'Актуальная',
+    trigger: 'Событие ИС',
+    entityTypes: ['Юридическое лицо', 'Контрагент', 'Уведомление', 'Штраф', 'ЭВД'],
+    attributes: [
+      { id: 'attr-violation', name: 'Тип нарушения', type: 'Справочник', required: true, source: 'Типы нарушений' },
+      { id: 'attr-amount', name: 'Сумма штрафа', type: 'Формула', required: true, formula: 'база * коэффициент повторности' }
+    ],
+    stages: [
+      {
+        id: 's-notice',
+        name: 'Подготовка основания',
+        department: 'Юридическое сопровождение',
+        slaHours: 12,
+        autoTaskTemplateId: 'tt-legal-notice',
+        requiredAttributes: ['Основание', 'Расчет нарушения'],
+        escalationRule: 'критичная эскалация через email и внутрисистемное уведомление'
+      },
+      {
+        id: 's-control',
+        name: 'Контроль реакции контрагента',
+        department: 'Операционный контроль',
+        slaHours: 24,
+        autoTaskTemplateId: 'tt-penalty-response-control',
+        requiredAttributes: ['Ответ контрагента', 'План корректирующих действий'],
+        escalationRule: 'повторное уведомление через 24 часа'
+      }
+    ],
+    validationRules: ['Нужна ссылка на инцидент или предписание', 'Сумма штрафа пересчитывается при изменении повторности'],
+    integrationRules: ['Создать ЭВД по шаблону', 'Синхронно зарегистрировать исходящее событие в СЭД']
+  },
+  {
+    id: 'pt-client-appeal',
+    name: 'Обработка обращения клиента',
+    processType: 'Клиентское обращение',
+    partyKinds: ['ФЛ'],
+    version: 1,
+    status: 'Актуальная',
+    trigger: 'Событие ИС',
+    entityTypes: ['Физическое лицо', 'Контрагент', 'Обращение', 'Задача', 'Коммуникация'],
+    attributes: [
+      { id: 'attr-appeal-category', name: 'Категория обращения', type: 'Справочник', required: true, source: 'Категории обращений' },
+      { id: 'attr-channel', name: 'Канал обращения', type: 'Справочник', required: true, source: 'Каналы коммуникаций' },
+      { id: 'attr-client-answer-date', name: 'Срок ответа клиенту', type: 'Дата', required: true },
+      { id: 'attr-appeal-risk', name: 'Риск просрочки обращения', type: 'Формула', required: false, formula: 'оставшиеся часы SLA < 4 ? высокий : средний' }
+    ],
+    stages: [
+      {
+        id: 's-appeal-classify',
+        name: 'Регистрация и классификация обращения',
+        department: 'Контактный центр',
+        slaHours: 4,
+        autoTaskTemplateId: 'tt-appeal-classify',
+        requiredAttributes: ['Категория обращения', 'Канал обращения', 'Согласие ПДн'],
+        escalationRule: 'при SLA меньше 1 часа уведомить старшего смены контактного центра'
+      },
+      {
+        id: 's-appeal-resolution',
+        name: 'Операционная проверка и подготовка решения',
+        department: 'Операционный контроль',
+        slaHours: 16,
+        autoTaskTemplateId: 'tt-appeal-resolution',
+        requiredAttributes: ['Причина обращения', 'Решение', 'Срок ответа клиенту'],
+        escalationRule: 'при спорной операции направить уведомление владельцу процесса'
+      },
+      {
+        id: 's-satisfaction',
+        name: 'Закрытие и контроль удовлетворенности',
+        department: 'Контактный центр',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-satisfaction-control',
+        requiredAttributes: ['Итоговый ответ', 'Оценка клиента', 'Причина закрытия'],
+        escalationRule: 'если оценка ниже 4, создать повторную задачу контроля качества'
+      }
+    ],
+    validationRules: [
+      'Для ФЛ обязательно наличие согласия на обработку ПДн',
+      'Категория и канал обращения обязательны до передачи в операционный контроль',
+      'Срок ответа клиенту не может превышать норматив SLA категории'
+    ],
+    integrationRules: ['Получить обращение из Телефонии или Email Gateway', 'Передать итог обработки в DWH', 'Сохранить коммуникацию в карточке клиента']
+  },
+  {
+    id: 'pt-profile-actualization',
+    name: 'Актуализация профиля и согласий ФЛ',
+    processType: 'Актуализация данных',
+    partyKinds: ['ФЛ'],
+    version: 1,
+    status: 'Актуальная',
+    trigger: 'Таймер',
+    entityTypes: ['Физическое лицо', 'Контрагент', 'Профиль', 'Согласие', 'Задача'],
+    attributes: [
+      { id: 'attr-profile-kind', name: 'Тип профиля', type: 'Справочник', required: true, source: 'Типы контрагентов' },
+      { id: 'attr-consent-expiration', name: 'Дата окончания согласия', type: 'Дата', required: true },
+      { id: 'attr-data-completeness', name: 'Полнота данных', type: 'Формула', required: false, formula: 'заполненные поля / обязательные поля * 100' },
+      { id: 'attr-publish-result', name: 'Результат публикации', type: 'Строка', required: false }
+    ],
+    stages: [
+      {
+        id: 's-profile-check',
+        name: 'Проверка состава данных',
+        department: 'Операционный контроль',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-profile-actualization',
+        requiredAttributes: ['Реквизиты или документ', 'Контакты', 'Согласия'],
+        escalationRule: 'если полнота ниже 80%, уведомить куратора карточки'
+      },
+      {
+        id: 's-consent-refresh',
+        name: 'Запрос подтверждения у клиента',
+        department: 'Контактный центр',
+        slaHours: 24,
+        autoTaskTemplateId: 'tt-consent-refresh',
+        requiredAttributes: ['Канал запроса', 'Подтверждение клиента', 'Срок действия согласия'],
+        escalationRule: 'повторить запрос через Email Gateway и внутрисистемное уведомление'
+      },
+      {
+        id: 's-profile-publish',
+        name: 'Публикация изменений и журналирование',
+        department: 'Администрирование Целевой ИС',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-profile-publish',
+        requiredAttributes: ['Результат DWH', 'Журналирование', 'Контроль дублей'],
+        escalationRule: 'при ошибке публикации создать инцидент администратору BPM'
+      }
+    ],
+    validationRules: [
+      'Для ФЛ проверяется срок действия согласия ПДн',
+      'Публикация невозможна при найденных дублях профиля'
+    ],
+    integrationRules: ['Проверить дубли профиля в DWH', 'Отправить клиенту запрос подтверждения через Email Gateway', 'Записать изменение профиля в обезличенный журнал']
+  },
+  {
+    id: 'pt-legal-profile-actualization',
+    name: 'Актуализация реквизитов и контактных лиц ЮЛ',
+    processType: 'Актуализация данных',
+    partyKinds: ['ЮЛ'],
+    version: 1,
+    status: 'Актуальная',
+    trigger: 'Таймер',
+    entityTypes: ['Юридическое лицо', 'Контрагент', 'Реквизиты', 'Контактное лицо', 'Задача'],
+    attributes: [
+      { id: 'attr-legal-profile-kind', name: 'Тип ЮЛ', type: 'Справочник', required: true, source: 'Типы контрагентов' },
+      { id: 'attr-legal-check-date', name: 'Дата плановой сверки', type: 'Дата', required: true },
+      { id: 'attr-legal-data-completeness', name: 'Полнота реквизитов', type: 'Формула', required: false, formula: 'заполненные реквизиты / обязательные реквизиты * 100' },
+      { id: 'attr-legal-publish-result', name: 'Результат публикации', type: 'Строка', required: false }
+    ],
+    stages: [
+      {
+        id: 's-legal-profile-check',
+        name: 'Проверка реквизитов и контактов',
+        department: 'Операционный контроль',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-legal-profile-check',
+        requiredAttributes: ['ИНН/КПП/ОГРН', 'Основной контакт', 'Связанные сервисы'],
+        escalationRule: 'если не заполнен основной контакт или КПП, уведомить куратора карточки'
+      },
+      {
+        id: 's-legal-profile-request',
+        name: 'Запрос подтверждения у контрагента',
+        department: 'Операционный контроль',
+        slaHours: 24,
+        autoTaskTemplateId: 'tt-legal-profile-request',
+        requiredAttributes: ['Адресат запроса', 'Подтвержденные реквизиты', 'Контрольный срок ответа'],
+        escalationRule: 'при отсутствии ответа создать follow-up коммуникацию куратору'
+      },
+      {
+        id: 's-legal-profile-publish',
+        name: 'Публикация изменений и журналирование',
+        department: 'Администрирование Целевой ИС',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-profile-publish',
+        requiredAttributes: ['Результат DWH', 'Журналирование', 'Контроль дублей'],
+        escalationRule: 'при ошибке публикации создать инцидент администратору BPM'
+      }
+    ],
+    validationRules: [
+      'Для ЮЛ обязательны ИНН, КПП, ОГРН и основной контакт',
+      'Публикация невозможна при найденных дублях профиля',
+      'Контрольный срок ответа контрагента не может быть раньше даты запроса'
+    ],
+    integrationRules: ['Проверить дубли профиля в DWH', 'Отправить запрос подтверждения через Email Gateway', 'Записать изменение профиля в обезличенный журнал']
+  },
+  {
+    id: 'pt-contract-onboarding',
+    name: 'Оформление договорных условий обслуживания',
+    processType: 'Договорной процесс',
+    partyKinds: ['ЮЛ'],
+    version: 1,
+    status: 'Актуальная',
+    trigger: 'Ручной запуск',
+    entityTypes: ['Юридическое лицо', 'Контрагент', 'Договорные условия', 'Документ', 'Задача'],
+    attributes: [
+      { id: 'attr-contract-kind', name: 'Тип договора', type: 'Справочник', required: true, source: 'Типы договоров' },
+      { id: 'attr-service-list', name: 'Сервисы в договоре', type: 'Множественный выбор', required: true, source: 'Сервисы' },
+      { id: 'attr-contract-number', name: 'Номер договора', type: 'Строка', required: false },
+      { id: 'attr-effective-date', name: 'Дата вступления в силу', type: 'Дата', required: true }
+    ],
+    stages: [
+      {
+        id: 's-contract-package',
+        name: 'Проверка договорного пакета',
+        department: 'Операционный контроль',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-contract-package',
+        requiredAttributes: ['Реквизиты контрагента', 'Перечень сервисов', 'Контакт подписанта'],
+        escalationRule: 'если пакет неполный, создать поручение куратору и уведомить юридическое сопровождение'
+      },
+      {
+        id: 's-contract-terms',
+        name: 'Согласование условий обслуживания',
+        department: 'Юридическое сопровождение',
+        slaHours: 16,
+        autoTaskTemplateId: 'tt-contract-terms',
+        requiredAttributes: ['Тарифный пакет', 'SLA обслуживания', 'Особые условия'],
+        escalationRule: 'при замечаниях юристов вернуть задачу операционному контролю с комментарием'
+      },
+      {
+        id: 's-contract-signing',
+        name: 'Контроль подписания и регистрации',
+        department: 'Юридическое сопровождение',
+        slaHours: 12,
+        autoTaskTemplateId: 'tt-contract-signing',
+        requiredAttributes: ['Номер договора', 'Статус подписания в СЭД', 'Дата вступления в силу'],
+        escalationRule: 'если СЭД не вернул статус, повторить обмен и уведомить администратора BPM'
+      },
+      {
+        id: 's-contract-activation',
+        name: 'Активация договорных параметров в CRM',
+        department: 'Операционный контроль',
+        slaHours: 8,
+        autoTaskTemplateId: 'tt-contract-activation',
+        requiredAttributes: ['Карточка договора', 'Параметры сервиса', 'Контрольная дата'],
+        escalationRule: 'если параметры не активированы, блокировать промышленный запуск сервиса'
+      }
+    ],
+    validationRules: [
+      'В CRM хранится карточка договорных условий, а не текст договора',
+      'Номер договора обязателен только после подтверждения статуса подписания из СЭД',
+      'Активация сервисных параметров невозможна без валидированного договорного пакета'
+    ],
+    integrationRules: ['Получить статус подписания из СЭД', 'Сохранить регистрационный номер и ссылку на карточку СЭД', 'Передать договорные параметры в DWH']
+  }
+];
+
+const processes: ProcessInstance[] = [
+  {
+    id: 'BP-2026-0148',
+    templateId: 'pt-connect-sbp',
+    title: 'Подключение СРБ к СБП',
+    type: 'Подключение сервиса',
+    status: 'В работе',
+    counterpartyId: 'КО-000184',
+    stageIndex: 1,
+    startedAt: '2026-07-30T09:15:00+07:00',
+    dueDate: '2026-08-08',
+    initiatorId: 'u-001',
+    ownerDepartment: 'Офис управления процессами',
+    currentGroup: 'Технологическая интеграция',
+    priority: 'Высокий',
+    elapsedHours: 42,
+    businessObjectId: 'ЗК-0148',
+    taskIds: ['TASK-2041', 'TASK-2042'],
+    documentIds: ['DOC-901', 'DOC-902'],
+    integrationIds: ['INT-501', 'INT-502'],
+    history: [
+      {
+        at: '2026-07-30T09:15:00+07:00',
+        actorId: 'u-001',
+        action: 'Запущен процесс',
+        details: 'Создана задача проверки единого профиля',
+        status: 'В работе'
+      },
+      {
+        at: '2026-07-30T17:20:00+07:00',
+        actorId: 'u-005',
+        action: 'Этап завершен',
+        details: 'Профиль валидирован, создана задача технологической проверки'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0152',
+    templateId: 'pt-penalty-notice',
+    title: 'Уведомление ВКЦ по нарушению SLA СБП',
+    type: 'Уведомление/штраф',
+    status: 'Риск сроков',
+    counterpartyId: 'КО-000219',
+    stageIndex: 0,
+    startedAt: '2026-08-01T13:40:00+07:00',
+    dueDate: '2026-08-04',
+    initiatorId: 'u-001',
+    ownerDepartment: 'Офис управления процессами',
+    currentGroup: 'Юридическое сопровождение',
+    priority: 'Критичный',
+    elapsedHours: 69,
+    businessObjectId: 'ШТ-0152',
+    taskIds: ['TASK-2050'],
+    documentIds: ['DOC-905'],
+    integrationIds: ['INT-503'],
+    history: [
+      {
+        at: '2026-08-01T13:40:00+07:00',
+        actorId: 'u-001',
+        action: 'Автозапуск по событию ИС',
+        details: 'Зафиксировано превышение SLA по 4 инцидентам',
+        status: 'Новая'
+      },
+      {
+        at: '2026-08-04T08:10:00+07:00',
+        actorId: 'u-006',
+        action: 'Эскалация',
+        details: 'Срок контрольной точки истекает сегодня'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0157',
+    templateId: 'pt-marketing-campaign',
+    title: 'Кешбэк выходного дня для СМС',
+    type: 'Маркетинговая акция',
+    status: 'Ожидание контрагента',
+    counterpartyId: 'ТСП-000311',
+    stageIndex: 0,
+    startedAt: '2026-08-02T10:10:00+07:00',
+    dueDate: '2026-08-13',
+    initiatorId: 'u-003',
+    ownerDepartment: 'Партнерские программы',
+    currentGroup: 'Партнерские программы',
+    priority: 'Средний',
+    elapsedHours: 17,
+    businessObjectId: 'АКЦ-0157',
+    taskIds: ['TASK-2056'],
+    documentIds: ['DOC-908'],
+    integrationIds: ['INT-504'],
+    history: [
+      {
+        at: '2026-08-02T10:10:00+07:00',
+        actorId: 'u-003',
+        action: 'Запущен процесс',
+        details: 'Создана задача расчета бюджета акции',
+        status: 'В работе'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0160',
+    templateId: 'pt-connect-sbp',
+    title: 'Подключение НКО "Быстрый перевод" к СБП',
+    type: 'Подключение сервиса',
+    status: 'Запущен',
+    counterpartyId: 'НКО-000143',
+    stageIndex: 0,
+    startedAt: '2026-08-04T09:00:00+07:00',
+    dueDate: '2026-08-10',
+    initiatorId: 'u-002',
+    ownerDepartment: 'Офис управления процессами',
+    currentGroup: 'Операционный контроль',
+    priority: 'Высокий',
+    elapsedHours: 2,
+    businessObjectId: 'ЗК-0160',
+    taskIds: ['TASK-2062'],
+    documentIds: ['DOC-912'],
+    integrationIds: ['INT-505'],
+    history: [
+      {
+        at: '2026-08-04T09:00:00+07:00',
+        actorId: 'u-002',
+        action: 'Ручной запуск',
+        details: 'Создана первая задача по шаблону "Проверить единый профиль"',
+        status: 'Новая'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0168',
+    templateId: 'pt-client-appeal',
+    title: 'Обращение Кузнецовой М.В. по спорной операции СБП',
+    type: 'Клиентское обращение',
+    status: 'В работе',
+    counterpartyId: 'ФЛ-000002',
+    stageIndex: 1,
+    startedAt: '2026-08-03T19:25:00+07:00',
+    dueDate: '2026-08-05',
+    initiatorId: 'u-002',
+    ownerDepartment: 'Контактный центр',
+    currentGroup: 'Операционный контроль',
+    priority: 'Критичный',
+    elapsedHours: 15,
+    businessObjectId: 'ОБР-0168',
+    taskIds: ['TASK-2090', 'TASK-2091'],
+    documentIds: [],
+    integrationIds: ['INT-507'],
+    history: [
+      {
+        at: '2026-08-03T19:25:00+07:00',
+        actorId: 'u-002',
+        action: 'Автозапуск по обращению клиента',
+        details: 'Обращение классифицировано как спорная операция СБП',
+        status: 'В работе'
+      },
+      {
+        at: '2026-08-03T22:10:00+07:00',
+        actorId: 'u-005',
+        action: 'Переход этапа',
+        details: 'Создана задача операционной проверки обращения'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0171',
+    templateId: 'pt-profile-actualization',
+    title: 'Актуализация профиля и согласий Иванова А.С.',
+    type: 'Актуализация данных',
+    status: 'Запущен',
+    counterpartyId: 'ФЛ-000001',
+    stageIndex: 0,
+    startedAt: '2026-08-04T10:15:00+07:00',
+    dueDate: '2026-08-09',
+    initiatorId: 'u-001',
+    ownerDepartment: 'Операционный контроль',
+    currentGroup: 'Операционный контроль',
+    priority: 'Средний',
+    elapsedHours: 2,
+    businessObjectId: 'ПРФ-0171',
+    taskIds: ['TASK-2092'],
+    documentIds: [],
+    integrationIds: ['INT-508'],
+    history: [
+      {
+        at: '2026-08-04T10:15:00+07:00',
+        actorId: 'u-001',
+        action: 'Плановый запуск по таймеру',
+        details: 'Согласие ПДн истекает в контрольном горизонте, создана задача проверки профиля',
+        status: 'Новая'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0901',
+    templateId: 'pt-connect-sbp',
+    title: 'Подключение Норд Капитал Банк к СБП и программе лояльности',
+    type: 'Подключение сервиса',
+    status: 'В работе',
+    counterpartyId: 'КО-009001',
+    stageIndex: 1,
+    startedAt: '2026-08-05T09:40:00+07:00',
+    dueDate: '2026-08-12',
+    initiatorId: 'u-001',
+    ownerDepartment: 'Офис управления процессами',
+    currentGroup: 'Технологическая интеграция',
+    priority: 'Высокий',
+    elapsedHours: 6,
+    businessObjectId: 'ЗК-0901',
+    taskIds: ['TASK-2901', 'TASK-2902'],
+    documentIds: ['DOC-9901', 'DOC-9902'],
+    integrationIds: ['INT-5901'],
+    history: [
+      {
+        at: '2026-08-05T09:40:00+07:00',
+        actorId: 'u-001',
+        action: 'Запущен процесс',
+        details: 'Создана задача проверки единого профиля Норд Капитал Банк',
+        status: 'В работе'
+      },
+      {
+        at: '2026-08-05T11:15:00+07:00',
+        actorId: 'u-005',
+        action: 'Этап завершен',
+        details: 'Профиль Норд Капитал Банк подтвержден, создана задача проверки API-паспорта СБП'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0902',
+    templateId: 'pt-client-appeal',
+    title: 'Обращение Лебедевой А.П. по кешбэку и СБП',
+    type: 'Клиентское обращение',
+    status: 'В работе',
+    counterpartyId: 'ФЛ-009001',
+    stageIndex: 1,
+    startedAt: '2026-08-05T10:05:00+07:00',
+    dueDate: '2026-08-06',
+    initiatorId: 'u-001',
+    ownerDepartment: 'Контактный центр',
+    currentGroup: 'Операционный контроль',
+    priority: 'Высокий',
+    elapsedHours: 3,
+    businessObjectId: 'ОБР-0902',
+    taskIds: ['TASK-2903', 'TASK-2904'],
+    documentIds: ['DOC-9903'],
+    integrationIds: ['INT-5902'],
+    history: [
+      {
+        at: '2026-08-05T10:05:00+07:00',
+        actorId: 'u-002',
+        action: 'Автозапуск по обращению клиента',
+        details: 'Обращение из чата классифицировано как спорное начисление кешбэка по СБП',
+        status: 'В работе'
+      },
+      {
+        at: '2026-08-05T10:34:00+07:00',
+        actorId: 'u-002',
+        action: 'Переход этапа',
+        details: 'Создана задача операционной проверки начисления'
+      }
+    ]
+  },
+  {
+    id: 'BP-2026-0910',
+    templateId: 'pt-contract-onboarding',
+    title: 'Договорные условия обслуживания Норд Капитал Банк',
+    type: 'Договорной процесс',
+    status: 'В работе',
+    counterpartyId: 'КО-009001',
+    stageIndex: 1,
+    startedAt: '2026-08-05T12:00:00+07:00',
+    dueDate: '2026-08-09',
+    initiatorId: 'u-001',
+    ownerDepartment: 'Офис управления процессами',
+    currentGroup: 'Юридическое сопровождение',
+    priority: 'Высокий',
+    elapsedHours: 4,
+    businessObjectId: 'ДОГ-0910',
+    taskIds: ['TASK-2910', 'TASK-2911'],
+    documentIds: ['DOC-9910', 'DOC-9911'],
+    integrationIds: ['INT-5910'],
+    history: [
+      {
+        at: '2026-08-05T12:00:00+07:00',
+        actorId: 'u-001',
+        action: 'Запущен договорной процесс',
+        details: 'Создана задача проверки договорного пакета Норд Капитал Банк',
+        status: 'В работе'
+      },
+      {
+        at: '2026-08-05T13:20:00+07:00',
+        actorId: 'u-005',
+        action: 'Этап завершен',
+        details: 'Пакет и контакт подписанта подтверждены, создана задача согласования договорных условий'
+      }
+    ]
+  }
+];
+
+const tasks: Task[] = [
+  {
+    id: 'TASK-2041',
+    title: 'Проверить единый профиль СРБ',
+    templateId: 'tt-verify-profile',
+    status: 'Выполнена',
+    priority: 'Средний',
+    counterpartyId: 'КО-000184',
+    processId: 'BP-2026-0148',
+    assigneeId: 'u-005',
+    assigneeGroup: 'Операционный контроль',
+    dueDate: '2026-07-30',
+    createdAt: '2026-07-30T09:15:00+07:00',
+    requiredFields: ['Реквизиты', 'Контакты', 'Связанные сервисы'],
+    completedFields: ['Реквизиты', 'Контакты', 'Связанные сервисы'],
+    timeSpentHours: 5.5,
+    links: ['КО-000184', 'BP-2026-0148'],
+    comments: ['Контакт ИТ подтвержден, реквизиты актуальны.'],
+    history: [
+      {
+        at: '2026-07-30T09:16:00+07:00',
+        actorId: 'u-005',
+        action: 'Назначена',
+        details: 'Задача назначена группе Операционный контроль',
+        status: 'Назначена'
+      },
+      {
+        at: '2026-07-30T17:20:00+07:00',
+        actorId: 'u-005',
+        action: 'Выполнена',
+        details: 'Все обязательные поля заполнены',
+        status: 'Выполнена'
+      }
+    ]
+  },
+  {
+    id: 'TASK-2042',
+    title: 'Проверить API-паспорт СБП для СРБ',
+    templateId: 'tt-api-passport',
+    status: 'В работе',
+    priority: 'Высокий',
+    counterpartyId: 'КО-000184',
+    processId: 'BP-2026-0148',
+    assigneeId: 'u-004',
+    assigneeGroup: 'Технологическая интеграция',
+    dueDate: '2026-08-06',
+    createdAt: '2026-07-30T17:22:00+07:00',
+    requiredFields: ['API-паспорт', 'Тестовый стенд', 'Контакт ИТ'],
+    completedFields: ['API-паспорт', 'Контакт ИТ'],
+    timeSpentHours: 11,
+    links: ['КО-000184', 'BP-2026-0148', 'DOC-901'],
+    comments: ['Ожидаем повторный прогон тестового сценария C2B.'],
+    history: [
+      {
+        at: '2026-07-30T17:22:00+07:00',
+        actorId: 'u-004',
+        action: 'Создана автоматически',
+        details: 'Предыдущий этап процесса завершен',
+        status: 'Новая'
+      }
+    ]
+  },
+  {
+    id: 'TASK-2050',
+    title: 'Подготовить уведомление ВКЦ по нарушению SLA',
+    templateId: 'tt-legal-notice',
+    status: 'Просрочена',
+    priority: 'Критичный',
+    counterpartyId: 'КО-000219',
+    processId: 'BP-2026-0152',
+    assigneeGroup: 'Юридическое сопровождение',
+    dueDate: '2026-08-03',
+    createdAt: '2026-08-01T13:41:00+07:00',
+    requiredFields: ['Основание', 'Расчет нарушения', 'Получатель'],
+    completedFields: ['Основание', 'Получатель'],
+    timeSpentHours: 7,
+    links: ['КО-000219', 'BP-2026-0152', 'DOC-905'],
+    comments: ['Не хватает финального расчета повторности нарушения.'],
+    history: [
+      {
+        at: '2026-08-01T13:41:00+07:00',
+        actorId: 'u-001',
+        action: 'Создана автоматически',
+        details: 'Событие превышения SLA',
+        status: 'Новая'
+      },
+      {
+        at: '2026-08-04T08:10:00+07:00',
+        actorId: 'u-006',
+        action: 'Эскалация',
+        details: 'Просрочка 29 часов',
+        status: 'Просрочена'
+      }
+    ]
+  },
+  {
+    id: 'TASK-2056',
+    title: 'Согласовать бюджет акции для СМС',
+    templateId: 'tt-marketing-budget',
+    status: 'Ожидание',
+    priority: 'Средний',
+    counterpartyId: 'ТСП-000311',
+    processId: 'BP-2026-0157',
+    assigneeId: 'u-003',
+    assigneeGroup: 'Партнерские программы',
+    dueDate: '2026-08-07',
+    createdAt: '2026-08-02T10:11:00+07:00',
+    requiredFields: ['Период акции', 'Бюджет', 'Механика начисления'],
+    completedFields: ['Период акции', 'Механика начисления'],
+    timeSpentHours: 3,
+    links: ['ТСП-000311', 'BP-2026-0157'],
+    comments: ['Контрагент уточняет лимит кешбэка на карту.'],
+    history: [
+      {
+        at: '2026-08-02T10:11:00+07:00',
+        actorId: 'u-003',
+        action: 'Создана автоматически',
+        details: 'Процесс маркетинговой акции запущен',
+        status: 'Новая'
+      }
+    ]
+  },
+  {
+    id: 'TASK-2062',
+    title: 'Проверить единый профиль НКО "Быстрый перевод"',
+    templateId: 'tt-verify-profile',
+    status: 'Назначена',
+    priority: 'Высокий',
+    counterpartyId: 'НКО-000143',
+    processId: 'BP-2026-0160',
+    assigneeGroup: 'Операционный контроль',
+    dueDate: '2026-08-05',
+    createdAt: '2026-08-04T09:00:00+07:00',
+    requiredFields: ['Реквизиты', 'Контакты', 'Связанные сервисы'],
+    completedFields: ['Реквизиты'],
+    timeSpentHours: 1,
+    links: ['НКО-000143', 'BP-2026-0160'],
+    comments: ['Нужно подтвердить контакт ИТ и групповой email.'],
+    history: [
+      {
+        at: '2026-08-04T09:00:00+07:00',
+        actorId: 'u-002',
+        action: 'Создана автоматически',
+        details: 'Ручной запуск процесса подключения',
+        status: 'Новая'
+      }
+    ]
+  },
+  {
+    id: 'TASK-2065',
+    title: 'Проверить импорт списка контактных лиц',
+    templateId: 'tt-verify-profile',
+    status: 'Новая',
+    priority: 'Средний',
+    counterpartyId: 'ПР-000077',
+    assigneeGroup: 'Операционный контроль',
+    dueDate: '2026-08-08',
+    createdAt: '2026-08-03T16:40:00+07:00',
+    requiredFields: ['Файл XLSX', 'Проверка дублей'],
+    completedFields: [],
+    timeSpentHours: 0,
+    links: ['ПР-000077', 'INT-506'],
+    comments: [],
+    history: [
+      {
+        at: '2026-08-03T16:40:00+07:00',
+        actorId: 'u-008',
+        action: 'Создана по ошибке импорта',
+        details: 'Найдены 3 дубля контактов',
+        status: 'Новая'
+      }
+    ]
+  }
+];
+
+const additionalCounterparties: Counterparty[] = [
+  {
+    id: 'КО-000326',
+    name: 'АО "Уральский Банк Развития"',
+    shortName: 'УБР',
+    partyKind: 'ЮЛ',
+    type: 'КО',
+    status: 'Активен',
+    inn: '6671180326',
+    kpp: '667101001',
+    ogrn: '1026600003260',
+    region: 'Свердловская область',
+    address: '620014, Екатеринбург, ул. Малышева, 44',
+    curatorId: 'u-001',
+    segment: 'Участник ПС МИР',
+    riskScore: 24,
+    lastTouch: '2026-08-02T12:10:00+07:00',
+    nextControlDate: '2026-08-15',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Операционный контроль', 'Технологическая интеграция'],
+    services: [
+      { service: 'ПС МИР', status: 'Подключен', stage: 'Промышленная эксплуатация', connectedAt: '2020-02-11', ownerDepartment: 'Операционный контроль', incidentCount: 1, monthlyOperations: 2980000, slaHours: 24 },
+      { service: 'СБП', status: 'Подключен', stage: 'Промышленная эксплуатация', connectedAt: '2024-04-15', ownerDepartment: 'Технологическая интеграция', incidentCount: 0, monthlyOperations: 970000, slaHours: 16 }
+    ],
+    contacts: [{ id: 'c-101', name: 'Евгений Климов', position: 'Директор процессинга', phone: '+7 343 301-12-26', email: 'e.klimov@ubr.example', primary: true }]
+  },
+  {
+    id: 'ТСП-000428',
+    name: 'ООО "Аптечная сеть Забота"',
+    shortName: 'Забота',
+    partyKind: 'ЮЛ',
+    type: 'ТСП',
+    status: 'Подключение',
+    inn: '7728428428',
+    kpp: '772801001',
+    ogrn: '1187746042800',
+    region: 'Москва',
+    address: '117437, Москва, ул. Профсоюзная, 93',
+    curatorId: 'u-003',
+    segment: 'Партнер Программы лояльности',
+    riskScore: 31,
+    lastTouch: '2026-08-01T16:25:00+07:00',
+    nextControlDate: '2026-08-11',
+    officialRequests: 0,
+    penalties: 0,
+    departments: ['Партнерские программы', 'Операционный контроль'],
+    services: [{ service: 'Программа лояльности', status: 'Подключается', stage: 'Согласование механики кешбэка', ownerDepartment: 'Партнерские программы', incidentCount: 0, monthlyOperations: 0, slaHours: 48 }],
+    contacts: [{ id: 'c-102', name: 'Алина Романова', position: 'CRM-директор', phone: '+7 495 228-42-80', email: 'a.romanova@zabota.example', primary: true }]
+  },
+  {
+    id: 'ПСП-000119',
+    name: 'ООО "Финтех Маршрут"',
+    shortName: 'ФинМаршрут',
+    partyKind: 'ЮЛ',
+    type: 'ПСП',
+    status: 'Риск',
+    inn: '7705119119',
+    kpp: '770501001',
+    ogrn: '1167746011900',
+    region: 'Москва',
+    address: '115184, Москва, Озерковская наб., 30',
+    curatorId: 'u-002',
+    segment: 'Платежная система - партнер',
+    riskScore: 62,
+    lastTouch: '2026-07-31T18:10:00+07:00',
+    nextControlDate: '2026-08-05',
+    officialRequests: 4,
+    penalties: 1,
+    departments: ['Юридическое сопровождение', 'Операционный контроль'],
+    services: [{ service: 'МПС', status: 'На проверке', stage: 'Проверка операционного отчета', ownerDepartment: 'Операционный контроль', incidentCount: 3, monthlyOperations: 640000, slaHours: 12 }],
+    contacts: [{ id: 'c-103', name: 'Максим Громов', position: 'Операционный директор', phone: '+7 495 511-91-19', email: 'm.gromov@finroute.example', primary: true }]
+  },
+  {
+    id: 'НКО-000260',
+    name: 'НКО "Кошелек Плюс"',
+    shortName: 'Кошелек Плюс',
+    partyKind: 'ЮЛ',
+    type: 'НКО',
+    status: 'Пилот',
+    inn: '7726260260',
+    kpp: '772601001',
+    ogrn: '1147746026000',
+    region: 'Москва',
+    address: '117105, Москва, Варшавское шоссе, 9',
+    curatorId: 'u-002',
+    segment: 'Участник СБП',
+    riskScore: 37,
+    lastTouch: '2026-08-03T10:40:00+07:00',
+    nextControlDate: '2026-08-09',
+    officialRequests: 2,
+    penalties: 0,
+    departments: ['Технологическая интеграция', 'Операционный контроль'],
+    services: [{ service: 'СБП', status: 'Пилот', stage: 'Пилот C2B-платежей', ownerDepartment: 'Технологическая интеграция', incidentCount: 1, monthlyOperations: 42000, slaHours: 16 }],
+    contacts: [{ id: 'c-104', name: 'Ирина Белова', position: 'Руководитель продукта', phone: '+7 495 260-26-00', email: 'i.belova@walletplus.example', primary: true }]
+  },
+  {
+    id: 'ПР-000512',
+    name: 'АО "Региональная транспортная карта"',
+    shortName: 'РТК',
+    partyKind: 'ЮЛ',
+    type: 'Партнер',
+    status: 'Активен',
+    inn: '5402512512',
+    kpp: '540201001',
+    ogrn: '1125476005120',
+    region: 'Новосибирская область',
+    address: '630082, Новосибирск, ул. Дачная, 37',
+    curatorId: 'u-003',
+    segment: 'Транспортная процессинговая платформа',
+    riskScore: 21,
+    lastTouch: '2026-08-04T11:30:00+07:00',
+    nextControlDate: '2026-08-21',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Технологическая интеграция', 'Операционный контроль'],
+    services: [{ service: 'Транспортная платформа', status: 'Подключен', stage: 'Промышленная эксплуатация', connectedAt: '2023-10-03', ownerDepartment: 'Технологическая интеграция', incidentCount: 0, monthlyOperations: 386000, slaHours: 24 }],
+    contacts: [{ id: 'c-105', name: 'Сергей Анисимов', position: 'Технический директор', phone: '+7 383 512-51-20', email: 's.anisimov@rtk.example', primary: true }]
+  },
+  {
+    id: 'КО-000617',
+    name: 'ПАО "Южный Коммерческий Банк"',
+    shortName: 'ЮКБ',
+    partyKind: 'ЮЛ',
+    type: 'КО',
+    status: 'Приостановлен',
+    inn: '6163617617',
+    kpp: '616301001',
+    ogrn: '1026100006170',
+    region: 'Ростовская область',
+    address: '344002, Ростов-на-Дону, ул. Большая Садовая, 68',
+    curatorId: 'u-001',
+    segment: 'Участник ПС МИР',
+    riskScore: 69,
+    lastTouch: '2026-07-28T09:50:00+07:00',
+    nextControlDate: '2026-08-04',
+    officialRequests: 6,
+    penalties: 2,
+    departments: ['Юридическое сопровождение', 'Операционный контроль'],
+    services: [{ service: 'ПС МИР', status: 'Приостановлен', stage: 'Ожидание плана корректирующих действий', connectedAt: '2018-06-18', ownerDepartment: 'Операционный контроль', incidentCount: 7, monthlyOperations: 720000, slaHours: 8 }],
+    contacts: [{ id: 'c-106', name: 'Валерия Никитина', position: 'Руководитель операционного блока', phone: '+7 863 617-61-70', email: 'v.nikitina@ukb.example', primary: true }]
+  },
+  {
+    id: 'ФЛ-000001',
+    name: 'Александр Сергеевич Иванов',
+    shortName: 'Иванов А.С.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Активен',
+    inn: '540812900112',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Новосибирская область',
+    address: 'Новосибирск, Заельцовский район',
+    curatorId: 'u-001',
+    segment: 'Держатель карты МИР',
+    riskScore: 16,
+    lastTouch: '2026-08-04T10:15:00+07:00',
+    nextControlDate: '2026-08-08',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Контактный центр', 'Операционный контроль'],
+    birthDate: '1987-04-12',
+    identityDocument: 'Паспорт **45 18',
+    loyaltyId: 'MIR-384920',
+    customerValue: 18400,
+    preferredChannel: 'Чат',
+    consentStatus: 'Получено',
+    personalDataLevel: 'Расширенный',
+    maskedCard: '2202 **** **** 4184',
+    appealCategory: 'Начисление кешбэка',
+    services: [{ service: 'Программа лояльности', status: 'Подключен', stage: 'Активный участник', connectedAt: '2025-09-12', ownerDepartment: 'Партнерские программы', incidentCount: 0, monthlyOperations: 18, slaHours: 24 }],
+    contacts: [{ id: 'c-201', name: 'Александр Иванов', position: 'Клиент', phone: '+7 913 000-41-84', email: 'a.ivanov@example.mail', primary: true }]
+  },
+  {
+    id: 'ФЛ-000002',
+    name: 'Марина Викторовна Кузнецова',
+    shortName: 'Кузнецова М.В.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Риск',
+    inn: '772601234505',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Москва',
+    address: 'Москва, район Чертаново Центральное',
+    curatorId: 'u-002',
+    segment: 'Пользователь СБП',
+    riskScore: 58,
+    lastTouch: '2026-08-03T19:25:00+07:00',
+    nextControlDate: '2026-08-05',
+    officialRequests: 3,
+    penalties: 0,
+    departments: ['Контактный центр', 'Технологическая интеграция'],
+    birthDate: '1992-11-03',
+    identityDocument: 'Паспорт **12 05',
+    loyaltyId: 'SBP-102938',
+    customerValue: 9200,
+    preferredChannel: 'Телефон',
+    consentStatus: 'Истекает',
+    personalDataLevel: 'Чувствительный',
+    maskedCard: '2202 **** **** 0905',
+    appealCategory: 'Спорная операция СБП',
+    services: [{ service: 'СБП', status: 'На проверке', stage: 'Разбор спорной операции', ownerDepartment: 'Технологическая интеграция', incidentCount: 2, monthlyOperations: 9, slaHours: 8 }],
+    contacts: [{ id: 'c-202', name: 'Марина Кузнецова', position: 'Клиент', phone: '+7 916 238-09-05', email: 'm.kuznetsova@example.mail', primary: true }]
+  },
+  {
+    id: 'ФЛ-000003',
+    name: 'Дмитрий Олегович Смирнов',
+    shortName: 'Смирнов Д.О.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Подключение',
+    inn: '781145678901',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Санкт-Петербург',
+    address: 'Санкт-Петербург, Приморский район',
+    curatorId: 'u-003',
+    segment: 'Участник акции лояльности',
+    riskScore: 22,
+    lastTouch: '2026-08-02T14:20:00+07:00',
+    nextControlDate: '2026-08-10',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Партнерские программы'],
+    birthDate: '1981-07-24',
+    identityDocument: 'Паспорт **78 01',
+    loyaltyId: 'MIR-775410',
+    customerValue: 12600,
+    preferredChannel: 'Email',
+    consentStatus: 'Получено',
+    personalDataLevel: 'Базовый',
+    maskedCard: '2200 **** **** 7011',
+    appealCategory: 'Подключение акции',
+    services: [{ service: 'Программа лояльности', status: 'Подключается', stage: 'Проверка участия в акции', ownerDepartment: 'Партнерские программы', incidentCount: 0, monthlyOperations: 4, slaHours: 24 }],
+    contacts: [{ id: 'c-203', name: 'Дмитрий Смирнов', position: 'Клиент', phone: '+7 921 445-70-11', email: 'd.smirnov@example.mail', primary: true }]
+  },
+  {
+    id: 'ФЛ-000004',
+    name: 'Екатерина Андреевна Соколова',
+    shortName: 'Соколова Е.А.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Пилот',
+    inn: '667100456789',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Свердловская область',
+    address: 'Екатеринбург, Верх-Исетский район',
+    curatorId: 'u-001',
+    segment: 'Тестовая группа транспортной платформы',
+    riskScore: 19,
+    lastTouch: '2026-08-01T09:30:00+07:00',
+    nextControlDate: '2026-08-16',
+    officialRequests: 0,
+    penalties: 0,
+    departments: ['Технологическая интеграция'],
+    birthDate: '1996-02-18',
+    identityDocument: 'Паспорт **66 89',
+    loyaltyId: 'TR-660018',
+    customerValue: 5400,
+    preferredChannel: 'Чат',
+    consentStatus: 'Получено',
+    personalDataLevel: 'Расширенный',
+    maskedCard: '2202 **** **** 6689',
+    appealCategory: 'Транспортная карта',
+    services: [{ service: 'Транспортная платформа', status: 'Пилот', stage: 'Тестирование поездок по QR', ownerDepartment: 'Технологическая интеграция', incidentCount: 0, monthlyOperations: 22, slaHours: 24 }],
+    contacts: [{ id: 'c-204', name: 'Екатерина Соколова', position: 'Клиент', phone: '+7 912 840-66-89', email: 'e.sokolova@example.mail', primary: true }]
+  },
+  {
+    id: 'ФЛ-000005',
+    name: 'Роман Игоревич Волков',
+    shortName: 'Волков Р.И.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Приостановлен',
+    inn: '616300987654',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Ростовская область',
+    address: 'Ростов-на-Дону, Кировский район',
+    curatorId: 'u-002',
+    segment: 'Пользователь СБП',
+    riskScore: 64,
+    lastTouch: '2026-07-30T20:00:00+07:00',
+    nextControlDate: '2026-08-04',
+    officialRequests: 2,
+    penalties: 0,
+    departments: ['Контактный центр', 'Операционный контроль'],
+    birthDate: '1979-05-30',
+    identityDocument: 'Паспорт **61 54',
+    loyaltyId: 'SBP-654321',
+    customerValue: 3100,
+    preferredChannel: 'Телефон',
+    consentStatus: 'Не получено',
+    personalDataLevel: 'Чувствительный',
+    maskedCard: '2202 **** **** 6154',
+    appealCategory: 'Блокировка операций',
+    services: [{ service: 'СБП', status: 'Приостановлен', stage: 'Ожидание подтверждения личности', ownerDepartment: 'Операционный контроль', incidentCount: 2, monthlyOperations: 0, slaHours: 8 }],
+    contacts: [{ id: 'c-205', name: 'Роман Волков', position: 'Клиент', phone: '+7 928 761-61-54', email: 'r.volkov@example.mail', primary: true }]
+  },
+  {
+    id: 'ФЛ-000006',
+    name: 'Наталья Петровна Орлова',
+    shortName: 'Орлова Н.П.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Активен',
+    inn: '253600123456',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Приморский край',
+    address: 'Владивосток, Ленинский район',
+    curatorId: 'u-001',
+    segment: 'Держатель карты МИР',
+    riskScore: 12,
+    lastTouch: '2026-08-03T12:05:00+07:00',
+    nextControlDate: '2026-08-19',
+    officialRequests: 0,
+    penalties: 0,
+    departments: ['Контактный центр'],
+    birthDate: '1988-09-16',
+    identityDocument: 'Паспорт **25 56',
+    loyaltyId: 'MIR-560012',
+    customerValue: 21400,
+    preferredChannel: 'Форма сайта',
+    consentStatus: 'Получено',
+    personalDataLevel: 'Базовый',
+    maskedCard: '2202 **** **** 2556',
+    appealCategory: 'Справка по операциям',
+    services: [{ service: 'ПС МИР', status: 'Подключен', stage: 'Активный держатель', connectedAt: '2022-01-15', ownerDepartment: 'Операционный контроль', incidentCount: 0, monthlyOperations: 36, slaHours: 24 }],
+    contacts: [{ id: 'c-206', name: 'Наталья Орлова', position: 'Клиент', phone: '+7 924 018-25-56', email: 'n.orlova@example.mail', primary: true }]
+  },
+  {
+    id: 'ФЛ-000007',
+    name: 'Павел Максимович Беляев',
+    shortName: 'Беляев П.М.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Риск',
+    inn: '770100765432',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Москва',
+    address: 'Москва, район Басманный',
+    curatorId: 'u-002',
+    segment: 'Пользователь СБП',
+    riskScore: 55,
+    lastTouch: '2026-08-04T08:45:00+07:00',
+    nextControlDate: '2026-08-06',
+    officialRequests: 4,
+    penalties: 0,
+    departments: ['Контактный центр', 'Технологическая интеграция'],
+    birthDate: '1990-12-08',
+    identityDocument: 'Паспорт **77 32',
+    loyaltyId: 'SBP-770032',
+    customerValue: 7600,
+    preferredChannel: 'Чат',
+    consentStatus: 'Истекает',
+    personalDataLevel: 'Расширенный',
+    maskedCard: '2202 **** **** 7732',
+    appealCategory: 'Ошибочный перевод',
+    services: [{ service: 'СБП', status: 'На проверке', stage: 'Запрос возврата ошибочного перевода', ownerDepartment: 'Технологическая интеграция', incidentCount: 1, monthlyOperations: 12, slaHours: 8 }],
+    contacts: [{ id: 'c-207', name: 'Павел Беляев', position: 'Клиент', phone: '+7 916 122-77-32', email: 'p.belyaev@example.mail', primary: true }]
+  },
+  {
+    id: 'ФЛ-000008',
+    name: 'Ольга Николаевна Захарова',
+    shortName: 'Захарова О.Н.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Активен',
+    inn: '540200678901',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Новосибирская область',
+    address: 'Новосибирск, Октябрьский район',
+    curatorId: 'u-003',
+    segment: 'Участник акции лояльности',
+    riskScore: 15,
+    lastTouch: '2026-08-02T17:45:00+07:00',
+    nextControlDate: '2026-08-20',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Партнерские программы', 'Контактный центр'],
+    birthDate: '1985-03-21',
+    identityDocument: 'Паспорт **54 91',
+    loyaltyId: 'MIR-118540',
+    customerValue: 16800,
+    preferredChannel: 'Email',
+    consentStatus: 'Получено',
+    personalDataLevel: 'Базовый',
+    maskedCard: '2202 **** **** 5491',
+    appealCategory: 'Кешбэк у партнера',
+    services: [{ service: 'Программа лояльности', status: 'Подключен', stage: 'Активная акция', connectedAt: '2025-12-20', ownerDepartment: 'Партнерские программы', incidentCount: 0, monthlyOperations: 14, slaHours: 24 }],
+    contacts: [{ id: 'c-208', name: 'Ольга Захарова', position: 'Клиент', phone: '+7 913 760-54-91', email: 'o.zakharova@example.mail', primary: true }]
+  },
+  {
+    id: 'КО-009001',
+    name: 'АО "Норд Капитал Банк"',
+    shortName: 'Норд Капитал Банк',
+    partyKind: 'ЮЛ',
+    type: 'КО',
+    status: 'Подключение',
+    inn: '5408199001',
+    kpp: '540801001',
+    ogrn: '1025400009001',
+    region: 'Новосибирская область',
+    address: '630099, Новосибирск, Красный проспект, 29',
+    curatorId: 'u-001',
+    segment: 'Банк-участник СБП и ПС МИР',
+    riskScore: 28,
+    lastTouch: '2026-08-05T09:40:00+07:00',
+    nextControlDate: '2026-08-07',
+    officialRequests: 2,
+    penalties: 0,
+    departments: ['Операционный контроль', 'Технологическая интеграция', 'Партнерские программы'],
+    services: [
+      { service: 'ПС МИР', status: 'Подключен', stage: 'Промышленная эксплуатация', connectedAt: '2021-06-18', ownerDepartment: 'Операционный контроль', incidentCount: 0, monthlyOperations: 3860000, slaHours: 24 },
+      { service: 'СБП', status: 'Подключается', stage: 'Проверка API-паспорта и тестового стенда', ownerDepartment: 'Технологическая интеграция', incidentCount: 1, monthlyOperations: 0, slaHours: 16 },
+      { service: 'Программа лояльности', status: 'На проверке', stage: 'Согласование правил начисления кешбэка', ownerDepartment: 'Партнерские программы', incidentCount: 0, monthlyOperations: 0, slaHours: 48 }
+    ],
+    contacts: [
+      { id: 'c-901', name: 'Виктория Румянцева', position: 'Заместитель директора операционного блока', phone: '+7 383 900-19-01', email: 'v.rumyantseva@nordcapital.example', primary: true },
+      { id: 'c-902', name: 'Артем Сафронов', position: 'Руководитель ИТ-интеграции', phone: '+7 383 900-19-02', email: 'a.safronov@nordcapital.example', primary: false }
+    ]
+  },
+  {
+    id: 'ФЛ-009001',
+    name: 'Анна Павловна Лебедева',
+    shortName: 'Лебедева А.П.',
+    partyKind: 'ФЛ',
+    type: 'ФЛ',
+    status: 'Активен',
+    inn: '540802990144',
+    kpp: 'не применяется',
+    ogrn: 'не применяется',
+    region: 'Новосибирская область',
+    address: 'Новосибирск, Центральный район',
+    curatorId: 'u-001',
+    segment: 'Премиальный пользователь СБП и лояльности',
+    riskScore: 18,
+    lastTouch: '2026-08-05T10:05:00+07:00',
+    nextControlDate: '2026-08-06',
+    officialRequests: 1,
+    penalties: 0,
+    departments: ['Контактный центр', 'Операционный контроль', 'Партнерские программы'],
+    birthDate: '1991-08-17',
+    identityDocument: 'Паспорт **54 44',
+    loyaltyId: 'MIR-900144',
+    customerValue: 34200,
+    preferredChannel: 'Чат',
+    consentStatus: 'Получено',
+    personalDataLevel: 'Расширенный',
+    maskedCard: '2202 **** **** 0144',
+    appealCategory: 'Не начислен кешбэк по операции СБП',
+    services: [
+      { service: 'СБП', status: 'На проверке', stage: 'Проверка начисления кешбэка по операции C2B', ownerDepartment: 'Операционный контроль', incidentCount: 1, monthlyOperations: 26, slaHours: 8 },
+      { service: 'Программа лояльности', status: 'Подключен', stage: 'Премиальный уровень участия', connectedAt: '2024-11-02', ownerDepartment: 'Партнерские программы', incidentCount: 0, monthlyOperations: 31, slaHours: 24 }
+    ],
+    contacts: [{ id: 'c-903', name: 'Анна Лебедева', position: 'Клиент', phone: '+7 913 900-01-44', email: 'a.lebedeva@example.mail', primary: true }]
+  }
+];
+
+const additionalTasks: Task[] = [
+  { id: 'TASK-2090', title: 'Классифицировать обращение Кузнецовой М.В.', templateId: 'tt-appeal-classify', status: 'Выполнена', priority: 'Высокий', counterpartyId: 'ФЛ-000002', processId: 'BP-2026-0168', assigneeGroup: 'Контактный центр', dueDate: '2026-08-04', createdAt: '2026-08-03T19:25:00+07:00', requiredFields: ['Категория обращения', 'Канал обращения', 'Согласие ПДн'], completedFields: ['Категория обращения', 'Канал обращения', 'Согласие ПДн'], timeSpentHours: 1.2, links: ['ФЛ-000002', 'BP-2026-0168'], comments: ['Категория: спорная операция СБП, канал: телефон, согласие ПДн подтверждено.'], history: [{ at: '2026-08-03T19:26:00+07:00', actorId: 'u-002', action: 'Создана автоматически', details: 'Входящее обращение распознано телефонией', status: 'Новая' }, { at: '2026-08-03T22:10:00+07:00', actorId: 'u-002', action: 'Выполнена', details: 'Обращение передано в операционный контроль', status: 'Выполнена' }] },
+  { id: 'TASK-2091', title: 'Проверить обращение Кузнецовой М.В. и подготовить решение', templateId: 'tt-appeal-resolution', status: 'В работе', priority: 'Критичный', counterpartyId: 'ФЛ-000002', processId: 'BP-2026-0168', assigneeGroup: 'Операционный контроль', dueDate: '2026-08-05', createdAt: '2026-08-03T22:10:00+07:00', requiredFields: ['Причина обращения', 'Решение', 'Срок ответа клиенту'], completedFields: ['Причина обращения'], timeSpentHours: 4.5, links: ['ФЛ-000002', 'BP-2026-0168', 'INT-507'], comments: ['Нужно сверить ответ банка-участника и подготовить итог клиенту до 05.08.'], history: [{ at: '2026-08-03T22:10:00+07:00', actorId: 'u-005', action: 'Создана автоматически', details: 'Завершен этап классификации обращения', status: 'Новая' }] },
+  { id: 'TASK-2092', title: 'Проверить состав данных профиля Иванова А.С.', templateId: 'tt-profile-actualization', status: 'Назначена', priority: 'Средний', counterpartyId: 'ФЛ-000001', processId: 'BP-2026-0171', assigneeGroup: 'Операционный контроль', dueDate: '2026-08-05', createdAt: '2026-08-04T10:15:00+07:00', requiredFields: ['Реквизиты или документ', 'Контакты', 'Согласия'], completedFields: ['Контакты'], timeSpentHours: 0.8, links: ['ФЛ-000001', 'BP-2026-0171', 'INT-508'], comments: ['Проверить срок согласия ПДн и актуальность email перед запросом подтверждения.'], history: [{ at: '2026-08-04T10:15:00+07:00', actorId: 'u-001', action: 'Создана автоматически', details: 'Плановая актуализация профиля по таймеру', status: 'Новая' }] },
+  { id: 'TASK-2071', title: 'Проверить согласие ПДн Иванова А.С.', templateId: 'tt-verify-profile', status: 'В работе', priority: 'Средний', counterpartyId: 'ФЛ-000001', assigneeGroup: 'Контактный центр', dueDate: '2026-08-06', createdAt: '2026-08-04T09:10:00+07:00', requiredFields: ['Согласие ПДн', 'Канал связи'], completedFields: ['Канал связи'], timeSpentHours: 1.5, links: ['ФЛ-000001'], comments: ['Клиент подтвердил канал в чате.'], history: [{ at: '2026-08-04T09:10:00+07:00', actorId: 'u-001', action: 'Создана через обращение ФЛ', details: 'Проверка согласия на обработку ПДн', status: 'Новая' }] },
+  { id: 'TASK-2072', title: 'Разобрать спорную операцию СБП Кузнецовой М.В.', templateId: 'tt-api-passport', status: 'Просрочена', priority: 'Критичный', counterpartyId: 'ФЛ-000002', assigneeGroup: 'Технологическая интеграция', dueDate: '2026-08-03', createdAt: '2026-08-02T18:30:00+07:00', requiredFields: ['ID операции', 'Ответ банка', 'Решение'], completedFields: ['ID операции'], timeSpentHours: 5, links: ['ФЛ-000002'], comments: ['Ожидается ответ банка-участника.'], history: [{ at: '2026-08-04T08:30:00+07:00', actorId: 'u-006', action: 'Эскалация', details: 'Просрочка клиентского обращения', status: 'Просрочена' }] },
+  { id: 'TASK-2073', title: 'Подключить Смирнова Д.О. к акции лояльности', templateId: 'tt-marketing-budget', status: 'Назначена', priority: 'Средний', counterpartyId: 'ФЛ-000003', assigneeGroup: 'Партнерские программы', dueDate: '2026-08-09', createdAt: '2026-08-04T09:30:00+07:00', requiredFields: ['Условия акции', 'Лимит кешбэка'], completedFields: [], timeSpentHours: 0, links: ['ФЛ-000003'], comments: [], history: [{ at: '2026-08-04T09:30:00+07:00', actorId: 'u-003', action: 'Создана по форме сайта', details: 'Клиент запросил участие в акции', status: 'Новая' }] },
+  { id: 'TASK-2074', title: 'Проверить пилот транспортной карты Соколовой Е.А.', templateId: 'tt-launch-control', status: 'В работе', priority: 'Низкий', counterpartyId: 'ФЛ-000004', assigneeGroup: 'Технологическая интеграция', dueDate: '2026-08-10', createdAt: '2026-08-01T09:35:00+07:00', requiredFields: ['QR-поездка', 'Логи валидации'], completedFields: ['QR-поездка'], timeSpentHours: 2, links: ['ФЛ-000004'], comments: ['Первая поездка прошла успешно.'], history: [{ at: '2026-08-01T09:35:00+07:00', actorId: 'u-004', action: 'Назначена', details: 'Пилотный клиент транспортной платформы', status: 'Назначена' }] },
+  { id: 'TASK-2075', title: 'Подтвердить личность Волкова Р.И.', templateId: 'tt-verify-profile', status: 'Ожидание', priority: 'Высокий', counterpartyId: 'ФЛ-000005', assigneeGroup: 'Контактный центр', dueDate: '2026-08-05', createdAt: '2026-08-03T20:10:00+07:00', requiredFields: ['Документ', 'Контрольный звонок'], completedFields: ['Контрольный звонок'], timeSpentHours: 1, links: ['ФЛ-000005'], comments: ['Клиенту отправлена ссылка подтверждения.'], history: [{ at: '2026-08-03T20:10:00+07:00', actorId: 'u-002', action: 'Создана по блокировке операций', details: 'Требуется подтверждение личности', status: 'Новая' }] },
+  { id: 'TASK-2076', title: 'Подготовить справку по операциям Орловой Н.П.', templateId: 'tt-verify-profile', status: 'Новая', priority: 'Низкий', counterpartyId: 'ФЛ-000006', assigneeGroup: 'Контактный центр', dueDate: '2026-08-11', createdAt: '2026-08-03T12:10:00+07:00', requiredFields: ['Период операций', 'Канал выдачи'], completedFields: [], timeSpentHours: 0, links: ['ФЛ-000006'], comments: [], history: [{ at: '2026-08-03T12:10:00+07:00', actorId: 'u-001', action: 'Создана из формы сайта', details: 'Запрос справки по операциям', status: 'Новая' }] },
+  { id: 'TASK-2077', title: 'Запросить возврат ошибочного перевода Беляева П.М.', templateId: 'tt-api-passport', status: 'В работе', priority: 'Высокий', counterpartyId: 'ФЛ-000007', assigneeGroup: 'Технологическая интеграция', dueDate: '2026-08-06', createdAt: '2026-08-04T08:50:00+07:00', requiredFields: ['Банк получателя', 'ID перевода', 'Статус запроса'], completedFields: ['ID перевода'], timeSpentHours: 2, links: ['ФЛ-000007'], comments: ['Запрос ушел в банк получателя.'], history: [{ at: '2026-08-04T08:50:00+07:00', actorId: 'u-002', action: 'Создана по обращению', details: 'Ошибочный перевод СБП', status: 'Новая' }] },
+  { id: 'TASK-2078', title: 'Проверить кешбэк Захаровой О.Н. у партнера', templateId: 'tt-marketing-budget', status: 'На проверке', priority: 'Средний', counterpartyId: 'ФЛ-000008', assigneeGroup: 'Партнерские программы', dueDate: '2026-08-07', createdAt: '2026-08-02T17:50:00+07:00', requiredFields: ['Чек', 'Правило акции', 'Решение'], completedFields: ['Чек', 'Правило акции'], timeSpentHours: 3, links: ['ФЛ-000008', 'ТСП-000311'], comments: ['Проверяется MCC партнера.'], history: [{ at: '2026-08-02T17:50:00+07:00', actorId: 'u-003', action: 'Создана по обращению', details: 'Не начислен кешбэк', status: 'Новая' }] },
+  { id: 'TASK-2079', title: 'Согласовать SLA по УБР', templateId: 'tt-launch-control', status: 'Новая', priority: 'Средний', counterpartyId: 'КО-000326', assigneeGroup: 'Операционный контроль', dueDate: '2026-08-12', createdAt: '2026-08-04T10:00:00+07:00', requiredFields: ['SLA-метрики', 'Ответственный банка'], completedFields: [], timeSpentHours: 0, links: ['КО-000326'], comments: [], history: [{ at: '2026-08-04T10:00:00+07:00', actorId: 'u-001', action: 'Создана вручную', details: 'Плановый контроль SLA', status: 'Новая' }] },
+  { id: 'TASK-2080', title: 'Проверить механику акции сети Забота', templateId: 'tt-marketing-budget', status: 'Назначена', priority: 'Средний', counterpartyId: 'ТСП-000428', assigneeGroup: 'Партнерские программы', dueDate: '2026-08-11', createdAt: '2026-08-01T16:40:00+07:00', requiredFields: ['Механика', 'Бюджет', 'Период'], completedFields: ['Механика'], timeSpentHours: 1, links: ['ТСП-000428'], comments: ['Уточняется лимит кешбэка.'], history: [{ at: '2026-08-01T16:40:00+07:00', actorId: 'u-003', action: 'Создана по процессу акции', details: 'Подключение партнера', status: 'Новая' }] },
+  { id: 'TASK-2081', title: 'Подготовить уведомление ФинМаршрут', templateId: 'tt-legal-notice', status: 'В работе', priority: 'Критичный', counterpartyId: 'ПСП-000119', assigneeGroup: 'Юридическое сопровождение', dueDate: '2026-08-05', createdAt: '2026-08-01T18:15:00+07:00', requiredFields: ['Основание', 'Расчет', 'Срок ответа'], completedFields: ['Основание'], timeSpentHours: 4, links: ['ПСП-000119'], comments: ['Нужен финальный расчет повторности нарушения.'], history: [{ at: '2026-08-01T18:15:00+07:00', actorId: 'u-001', action: 'Создана по нарушению SLA', details: 'Инциденты в операционном отчете', status: 'Новая' }] },
+  { id: 'TASK-2082', title: 'Проверить C2B-пилот Кошелек Плюс', templateId: 'tt-api-passport', status: 'Ожидание', priority: 'Высокий', counterpartyId: 'НКО-000260', assigneeGroup: 'Технологическая интеграция', dueDate: '2026-08-08', createdAt: '2026-08-03T10:45:00+07:00', requiredFields: ['Тестовый сценарий', 'Логи платежей'], completedFields: ['Тестовый сценарий'], timeSpentHours: 2.5, links: ['НКО-000260'], comments: ['Ждем повторный прогон от НКО.'], history: [{ at: '2026-08-03T10:45:00+07:00', actorId: 'u-004', action: 'Назначена', details: 'Пилотный C2B-сценарий', status: 'Назначена' }] },
+  { id: 'TASK-2083', title: 'Обновить регламент обмена с РТК', templateId: 'tt-verify-profile', status: 'Выполнена', priority: 'Низкий', counterpartyId: 'ПР-000512', assigneeGroup: 'Операционный контроль', dueDate: '2026-08-02', createdAt: '2026-07-30T11:00:00+07:00', requiredFields: ['Регламент', 'Ответственный'], completedFields: ['Регламент', 'Ответственный'], timeSpentHours: 3, links: ['ПР-000512'], comments: ['Регламент обновлен в wiki.'], history: [{ at: '2026-08-01T15:00:00+07:00', actorId: 'u-005', action: 'Выполнена', details: 'Регламент обмена обновлен', status: 'Выполнена' }] },
+  { id: 'TASK-2084', title: 'Контроль плана корректирующих действий ЮКБ', templateId: 'tt-legal-notice', status: 'Просрочена', priority: 'Критичный', counterpartyId: 'КО-000617', assigneeGroup: 'Юридическое сопровождение', dueDate: '2026-08-03', createdAt: '2026-07-29T09:55:00+07:00', requiredFields: ['План КД', 'Подтверждение банка'], completedFields: ['План КД'], timeSpentHours: 8, links: ['КО-000617'], comments: ['Банк не подтвердил срок восстановления.'], history: [{ at: '2026-08-04T08:00:00+07:00', actorId: 'u-006', action: 'Эскалация', details: 'Просрочка плана корректирующих действий', status: 'Просрочена' }] },
+  {
+    id: 'TASK-2901',
+    title: 'Проверить единый профиль Норд Капитал Банк перед подключением СБП',
+    templateId: 'tt-verify-profile',
+    status: 'Выполнена',
+    priority: 'Высокий',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0901',
+    assigneeId: 'u-005',
+    assigneeGroup: 'Операционный контроль',
+    dueDate: '2026-08-05',
+    createdAt: '2026-08-05T09:40:00+07:00',
+    requiredFields: ['Реквизиты', 'Контакты', 'Связанные сервисы'],
+    completedFields: ['Реквизиты', 'Контакты', 'Связанные сервисы'],
+    timeSpentHours: 1.6,
+    links: ['КО-009001', 'BP-2026-0901', 'DOC-9901'],
+    comments: [
+      'Профиль заполнен: ИНН, КПП, ОГРН, основной контакт операционного блока и ИТ-контакт подтверждены.',
+      'Действующий сервис ПС МИР без инцидентов, по СБП открыто подключение в рамках BP-2026-0901.'
+    ],
+    history: [
+      { at: '2026-08-05T09:40:00+07:00', actorId: 'u-001', action: 'Создана автоматически', details: 'Запуск процесса подключения Норд Капитал Банк к СБП', status: 'Новая' },
+      { at: '2026-08-05T10:05:00+07:00', actorId: 'u-005', action: 'Взята в работу', details: 'Проверены реквизиты, карточка контактов и сервисы', status: 'В работе' },
+      { at: '2026-08-05T11:15:00+07:00', actorId: 'u-005', action: 'Выполнена', details: 'Профиль валидирован, процесс переведен на технологическую проверку', status: 'Выполнена' }
+    ]
+  },
+  {
+    id: 'TASK-2902',
+    title: 'Проверить API-паспорт СБП и тестовый стенд Норд Капитал Банк',
+    templateId: 'tt-api-passport',
+    status: 'В работе',
+    priority: 'Высокий',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0901',
+    assigneeId: 'u-004',
+    assigneeGroup: 'Технологическая интеграция',
+    dueDate: '2026-08-07',
+    createdAt: '2026-08-05T11:15:00+07:00',
+    requiredFields: ['API-паспорт', 'Тестовый стенд', 'Контакт ИТ'],
+    completedFields: ['API-паспорт', 'Контакт ИТ'],
+    timeSpentHours: 2.3,
+    links: ['КО-009001', 'BP-2026-0901', 'DOC-9902', 'INT-5901'],
+    comments: [
+      'API-паспорт v1 получен, ответственный ИТ подтвержден. Остался повторный прогон C2B-сценария на тестовом стенде.',
+      'После выполнения система должна создать задачу промышленного запуска для операционного контроля.'
+    ],
+    history: [
+      { at: '2026-08-05T11:15:00+07:00', actorId: 'u-005', action: 'Создана автоматически', details: 'Завершена проверка единого профиля Норд Капитал Банк', status: 'Новая' },
+      { at: '2026-08-05T11:40:00+07:00', actorId: 'u-004', action: 'Взята в работу', details: 'Проверяются endpoint, сертификат и тестовый стенд', status: 'В работе' }
+    ]
+  },
+  {
+    id: 'TASK-2903',
+    title: 'Классифицировать обращение Лебедевой А.П. по кешбэку СБП',
+    templateId: 'tt-appeal-classify',
+    status: 'Выполнена',
+    priority: 'Высокий',
+    counterpartyId: 'ФЛ-009001',
+    processId: 'BP-2026-0902',
+    assigneeId: 'u-002',
+    assigneeGroup: 'Контактный центр',
+    dueDate: '2026-08-05',
+    createdAt: '2026-08-05T10:05:00+07:00',
+    requiredFields: ['Категория обращения', 'Канал обращения', 'Согласие ПДн'],
+    completedFields: ['Категория обращения', 'Канал обращения', 'Согласие ПДн'],
+    timeSpentHours: 0.7,
+    links: ['ФЛ-009001', 'BP-2026-0902', 'DOC-9903'],
+    comments: [
+      'Канал обращения: чат. Категория: не начислен кешбэк по C2B-операции СБП. Согласие ПДн подтверждено.'
+    ],
+    history: [
+      { at: '2026-08-05T10:05:00+07:00', actorId: 'u-002', action: 'Создана автоматически', details: 'Чат сопоставил обращение с карточкой ФЛ-009001', status: 'Новая' },
+      { at: '2026-08-05T10:34:00+07:00', actorId: 'u-002', action: 'Выполнена', details: 'Обращение передано на операционную проверку начисления', status: 'Выполнена' }
+    ]
+  },
+  {
+    id: 'TASK-2904',
+    title: 'Проверить начисление кешбэка Лебедевой А.П. и подготовить ответ',
+    templateId: 'tt-appeal-resolution',
+    status: 'В работе',
+    priority: 'Высокий',
+    counterpartyId: 'ФЛ-009001',
+    processId: 'BP-2026-0902',
+    assigneeId: 'u-005',
+    assigneeGroup: 'Операционный контроль',
+    dueDate: '2026-08-06',
+    createdAt: '2026-08-05T10:34:00+07:00',
+    requiredFields: ['Причина обращения', 'Решение', 'Срок ответа клиенту'],
+    completedFields: ['Причина обращения'],
+    timeSpentHours: 1.9,
+    links: ['ФЛ-009001', 'BP-2026-0902', 'INT-5902'],
+    comments: [
+      'Причина обращения предварительно подтверждена: операция прошла как C2B, но правило акции не применилось из-за задержки выгрузки партнера.',
+      'Нужно выбрать решение, заполнить срок ответа и завершить задачу, чтобы создалась задача закрытия обращения в контактном центре.'
+    ],
+    history: [
+      { at: '2026-08-05T10:34:00+07:00', actorId: 'u-002', action: 'Создана автоматически', details: 'Завершена классификация клиентского обращения', status: 'Новая' },
+      { at: '2026-08-05T11:05:00+07:00', actorId: 'u-005', action: 'Взята в работу', details: 'Проверяются операция СБП, правило акции и ответ партнера', status: 'В работе' }
+    ]
+  },
+  {
+    id: 'TASK-2910',
+    title: 'Проверить договорной пакет Норд Капитал Банк',
+    templateId: 'tt-contract-package',
+    status: 'Выполнена',
+    priority: 'Высокий',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0910',
+    assigneeId: 'u-005',
+    assigneeGroup: 'Операционный контроль',
+    dueDate: '2026-08-05',
+    createdAt: '2026-08-05T12:00:00+07:00',
+    requiredFields: ['Реквизиты контрагента', 'Перечень сервисов', 'Контакт подписанта'],
+    completedFields: ['Реквизиты контрагента', 'Перечень сервисов', 'Контакт подписанта'],
+    timeSpentHours: 1.4,
+    links: ['КО-009001', 'BP-2026-0910', 'DOC-9910'],
+    comments: ['Пакет проверен: сервисы СБП и лояльность, подписант Виктория Румянцева, реквизиты совпадают с единым профилем.'],
+    history: [
+      { at: '2026-08-05T12:00:00+07:00', actorId: 'u-001', action: 'Создана автоматически', details: 'Запущен договорной процесс Норд Капитал Банк', status: 'Новая' },
+      { at: '2026-08-05T13:20:00+07:00', actorId: 'u-005', action: 'Выполнена', details: 'Договорной пакет передан в юридическое сопровождение', status: 'Выполнена' }
+    ]
+  },
+  {
+    id: 'TASK-2911',
+    title: 'Согласовать договорные условия обслуживания Норд Капитал Банк',
+    templateId: 'tt-contract-terms',
+    status: 'В работе',
+    priority: 'Высокий',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0910',
+    assigneeId: 'u-007',
+    assigneeGroup: 'Юридическое сопровождение',
+    dueDate: '2026-08-06',
+    createdAt: '2026-08-05T13:20:00+07:00',
+    requiredFields: ['Тарифный пакет', 'SLA обслуживания', 'Ограничения и особые условия'],
+    completedFields: ['Тарифный пакет'],
+    timeSpentHours: 2.2,
+    links: ['КО-009001', 'BP-2026-0910', 'DOC-9910', 'INT-5910'],
+    comments: ['Юридическое сопровождение проверяет SLA 16 часов по СБП и особые условия по программе лояльности. Текст договора ведется во внешней СЭД.'],
+    history: [
+      { at: '2026-08-05T13:20:00+07:00', actorId: 'u-005', action: 'Создана автоматически', details: 'Завершена проверка договорного пакета', status: 'Новая' },
+      { at: '2026-08-05T13:35:00+07:00', actorId: 'u-007', action: 'Взята в работу', details: 'Проверяются тарифный пакет, SLA и особые условия обслуживания', status: 'В работе' }
+    ]
+  },
+  {
+    id: 'TASK-2915',
+    title: 'Уточнить окно тестирования СБП после встречи с Норд Капитал Банк',
+    templateId: 'tt-communication-followup',
+    status: 'Назначена',
+    priority: 'Средний',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0901',
+    assigneeGroup: 'Технологическая интеграция',
+    dueDate: '2026-08-06',
+    createdAt: '2026-08-05T09:25:00+07:00',
+    requiredFields: ['Итог коммуникации', 'Следующий шаг', 'Ответственный'],
+    completedFields: ['Итог коммуникации'],
+    timeSpentHours: 0.3,
+    links: ['КО-009001', 'BP-2026-0901', 'COM-7901'],
+    comments: ['Follow-up создан по итогам встречи: подтвердить окно повторного C2B-теста 07.08 и ответственного ИТ.'],
+    history: [{ at: '2026-08-05T09:25:00+07:00', actorId: 'u-001', action: 'Создана из коммуникации', details: 'Итоги встречи Норд Капитал Банк требуют действия технологической интеграции', status: 'Новая' }]
+  },
+  {
+    id: 'TASK-2916',
+    title: 'Подготовить позицию юристов по условиям договора Норд Капитал Банк',
+    templateId: 'tt-internal-handoff',
+    status: 'В работе',
+    priority: 'Высокий',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0910',
+    assigneeGroup: 'Юридическое сопровождение',
+    dueDate: '2026-08-06',
+    createdAt: '2026-08-05T13:30:00+07:00',
+    requiredFields: ['Запрошенное действие', 'Результат подразделения', 'Комментарий для инициатора'],
+    completedFields: ['Запрошенное действие'],
+    timeSpentHours: 1.1,
+    links: ['КО-009001', 'BP-2026-0910', 'HND-9101'],
+    comments: ['Поручение от операционного контроля: проверить особые условия договора без переноса текста договора в CRM.'],
+    history: [{ at: '2026-08-05T13:30:00+07:00', actorId: 'u-005', action: 'Создана по внутреннему поручению', details: 'Требуется позиция юридического сопровождения по условиям Норд Капитал Банк', status: 'Новая' }]
+  }
+];
+
+const documents: BusinessDocument[] = [
+  {
+    id: 'DOC-901',
+    name: 'API-паспорт СРБ СБП v2.xlsx',
+    kind: 'Файл',
+    format: 'XLSX',
+    size: '248 КБ',
+    status: 'Валидирован',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0148',
+    ownerId: 'u-004',
+    createdAt: '2026-07-30T16:50:00+07:00',
+    businessPurpose: 'Технический паспорт API для подключения СРБ к СБП',
+    service: 'СБП',
+    version: 'v2',
+    relatedTaskId: 'TASK-2042',
+    nextAction: 'Дождаться повторного прогона C2B-сценария на тестовом стенде'
+  },
+  {
+    id: 'DOC-902',
+    name: 'Карточка подключения СБП СРБ.pdf',
+    kind: 'Печатная форма',
+    format: 'PDF',
+    size: '612 КБ',
+    status: 'Загружен',
+    linkedObjectType: 'Контрагент',
+    linkedObjectId: 'КО-000184',
+    ownerId: 'u-001',
+    createdAt: '2026-07-31T10:00:00+07:00',
+    templateName: 'Карточка подключения сервиса',
+    businessPurpose: 'Заявка и реквизиты для подключения сервиса СБП',
+    service: 'СБП',
+    version: '1.0',
+    relatedTaskId: 'TASK-2041',
+    nextAction: 'Используется как основание для технологической проверки'
+  },
+  {
+    id: 'DOC-905',
+    name: 'Расчет нарушения SLA ВКЦ.xlsx',
+    kind: 'ЭВД',
+    format: 'XLSX',
+    size: '184 КБ',
+    status: 'На проверке',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0152',
+    ownerId: 'u-007',
+    createdAt: '2026-08-01T14:30:00+07:00',
+    templateName: 'ЭВД: расчет основания уведомления',
+    businessPurpose: 'Расчет основания для уведомления ВКЦ о нарушении SLA',
+    service: 'СБП',
+    version: 'расчет 08.2026',
+    relatedTaskId: 'TASK-2050',
+    nextAction: 'Юридическое сопровождение проверяет расчет перед отправкой уведомления'
+  },
+  {
+    id: 'DOC-908',
+    name: 'Механика акции СМС.docx',
+    kind: 'Файл',
+    format: 'DOCX',
+    size: '96 КБ',
+    status: 'Загружен',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0157',
+    ownerId: 'u-003',
+    createdAt: '2026-08-02T11:12:00+07:00',
+    businessPurpose: 'Условия маркетинговой акции и правила начисления кешбэка',
+    service: 'Программа лояльности',
+    version: 'проект 1',
+    relatedTaskId: 'TASK-2056',
+    validUntil: '2026-09-30',
+    nextAction: 'Ожидается подтверждение бюджета акции от ТСП'
+  },
+  {
+    id: 'DOC-912',
+    name: 'Заявка на подключение НКО Быстрый перевод.xml',
+    kind: 'Файл',
+    format: 'XML',
+    size: '42 КБ',
+    status: 'Валидирован',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0160',
+    ownerId: 'u-002',
+    createdAt: '2026-08-04T09:03:00+07:00',
+    businessPurpose: 'XML-заявка на подключение НКО к СБП',
+    service: 'СБП',
+    version: 'импорт 2026-08-04',
+    relatedTaskId: 'TASK-2062',
+    nextAction: 'Проверить реквизиты и контакт технического владельца'
+  },
+  {
+    id: 'DOC-9901',
+    name: 'Карточка подключения Норд Капитал Банк к СБП.pdf',
+    kind: 'Печатная форма',
+    format: 'PDF',
+    size: '684 КБ',
+    status: 'Валидирован',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0901',
+    ownerId: 'u-001',
+    createdAt: '2026-08-05T09:45:00+07:00',
+    templateName: 'Карточка подключения сервиса',
+    businessPurpose: 'Основание для подключения Норд Капитал Банк к СБП и программе лояльности',
+    service: 'СБП + Программа лояльности',
+    version: '1.0',
+    relatedTaskId: 'TASK-2901',
+    nextAction: 'Карточка подтверждена, используется на технологической проверке'
+  },
+  {
+    id: 'DOC-9902',
+    name: 'API-паспорт Норд Капитал Банк СБП v1.xlsx',
+    kind: 'Файл',
+    format: 'XLSX',
+    size: '312 КБ',
+    status: 'На проверке',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0901',
+    ownerId: 'u-004',
+    createdAt: '2026-08-05T11:18:00+07:00',
+    businessPurpose: 'API-паспорт и параметры тестового стенда для подключения Норд Капитал Банк к СБП',
+    service: 'СБП',
+    version: 'v1',
+    relatedTaskId: 'TASK-2902',
+    nextAction: 'Технологическая интеграция должна подтвердить тестовый стенд'
+  },
+  {
+    id: 'DOC-9903',
+    name: 'Материалы обращения Лебедевой А.П..pdf',
+    kind: 'ЭВД',
+    format: 'PDF',
+    size: '428 КБ',
+    status: 'Загружен',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0902',
+    ownerId: 'u-002',
+    createdAt: '2026-08-05T10:08:00+07:00',
+    templateName: 'Карточка клиентского обращения',
+    businessPurpose: 'Материалы обращения ФЛ по спорному начислению кешбэка',
+    service: 'СБП + Программа лояльности',
+    version: 'обращение 2026-08-05',
+    relatedTaskId: 'TASK-2903',
+    nextAction: 'Операционный контроль готовит решение и срок ответа клиенту'
+  },
+  {
+    id: 'DOC-9910',
+    name: 'Договорной пакет Норд Капитал Банк: реквизиты и сервисы.docx',
+    kind: 'Файл',
+    format: 'DOCX',
+    size: '156 КБ',
+    status: 'Валидирован',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0910',
+    ownerId: 'u-005',
+    createdAt: '2026-08-05T12:18:00+07:00',
+    templateName: 'Карточка договорных условий CRM',
+    businessPurpose: 'Договорной пакет для обслуживания Норд Капитал Банк по СБП и программе лояльности',
+    service: 'СБП + Программа лояльности',
+    contractNumber: 'ДОГ-0910/26',
+    version: 'проект 2',
+    relatedTaskId: 'TASK-2910',
+    validUntil: '2027-08-04',
+    nextAction: 'Юридическое сопровождение согласует тарифы, SLA и особые условия'
+  },
+  {
+    id: 'DOC-9911',
+    name: 'Регистрационная карточка договора Норд Капитал Банк CRM.pdf',
+    kind: 'Печатная форма',
+    format: 'PDF',
+    size: '224 КБ',
+    status: 'На проверке',
+    linkedObjectType: 'Процесс',
+    linkedObjectId: 'BP-2026-0910',
+    ownerId: 'u-007',
+    createdAt: '2026-08-05T13:32:00+07:00',
+    templateName: 'Печатная форма регистрационных реквизитов договора',
+    businessPurpose: 'Печатная форма регистрационных реквизитов договора Норд Капитал Банк',
+    service: 'Договорное сопровождение',
+    contractNumber: 'ДОГ-0910/26',
+    version: 'на проверке',
+    relatedTaskId: 'TASK-2911',
+    validUntil: '2027-08-04',
+    nextAction: 'Дождаться статуса подписания из СЭД и активировать параметры обслуживания'
+  }
+];
+
+const communications: Communication[] = [
+  {
+    id: 'COM-701',
+    counterpartyId: 'КО-000184',
+    type: 'Встреча',
+    subject: 'План подключения СБП и пилот лояльности',
+    at: '2026-07-29T11:00:00+07:00',
+    responsibleId: 'u-001',
+    summary: 'Согласованы тестовые сценарии C2B и перечень контактных лиц для ночных проверок.',
+    nextAction: 'Получить протокол повторного теста до 06.08',
+    status: 'Проведена',
+    channel: 'ВКС',
+    processId: 'BP-2026-0148',
+    agenda: ['Тестовый контур СБП', 'Контакты ночной смены', 'План промышленного запуска'],
+    participants: ['Елена Морозова', 'Анна Воронцова', 'Петр Савин'],
+    outcome: 'Протокол тестирования должен быть передан в технологическую интеграцию.'
+  },
+  {
+    id: 'COM-702',
+    counterpartyId: 'КО-000219',
+    type: 'Звонок',
+    subject: 'Обсуждение предписания по SLA',
+    at: '2026-08-01T15:25:00+07:00',
+    responsibleId: 'u-001',
+    summary: 'Контрагент подтвердил сбой маршрутизации запросов СБП.',
+    nextAction: 'Отправить уведомление и получить план корректирующих действий',
+    status: 'Требует follow-up',
+    channel: 'Телефон',
+    processId: 'BP-2026-0152',
+    agenda: ['Причина нарушения SLA', 'План корректирующих действий', 'Срок ответа контрагента'],
+    participants: ['Елена Морозова', 'Ольга Шестакова'],
+    outcome: 'Нужно завершить юридическое уведомление и зафиксировать срок реакции контрагента.',
+    recording: 'call-20260801-1525.mp3'
+  },
+  {
+    id: 'COM-703',
+    counterpartyId: 'ПР-000077',
+    type: 'Письмо',
+    subject: 'Уточнение API-паспорта транспортной платформы',
+    at: '2026-08-02T09:15:00+07:00',
+    responsibleId: 'u-003',
+    summary: 'Партнер прислал обновленный список endpoint и контакт дежурной смены.',
+    nextAction: 'Проверить файл импорта и передать в интеграцию',
+    status: 'Проведена',
+    channel: 'Email',
+    agenda: ['API-паспорт', 'Контакт дежурной смены'],
+    participants: ['Мария Лебедева', 'Оксана Гусева'],
+    outcome: 'Файл передан на проверку импорта.'
+  },
+  {
+    id: 'COM-704',
+    counterpartyId: 'ТСП-000311',
+    type: 'Обращение',
+    subject: 'Изменение условий акции',
+    at: '2026-08-03T14:10:00+07:00',
+    responsibleId: 'u-003',
+    summary: 'ТСП просит изменить лимит кешбэка с 500 до 700 рублей на карту.',
+    nextAction: 'Пересчитать бюджет и согласовать механику',
+    status: 'Требует follow-up',
+    channel: 'Email',
+    processId: 'BP-2026-0157',
+    agenda: ['Лимит кешбэка', 'Бюджет акции', 'Период запуска'],
+    participants: ['Мария Лебедева', 'Даниил Сорокин'],
+    outcome: 'Требуется пересчитать бюджет и передать в партнерские программы.'
+  },
+  {
+    id: 'COM-7901',
+    counterpartyId: 'КО-009001',
+    type: 'Встреча',
+    subject: 'Согласование тестового запуска СБП для Норд Капитал Банк',
+    at: '2026-08-05T09:20:00+07:00',
+    responsibleId: 'u-001',
+    summary: 'Норд Капитал Банк подтвердил готовность API-паспорта, контакт ИТ и окно для повторного C2B-теста 07.08.',
+    nextAction: 'Дождаться результата технологической проверки и назначить промышленный запуск',
+    status: 'Проведена',
+    channel: 'ВКС',
+    processId: 'BP-2026-0901',
+    agenda: ['Готовность API-паспорта', 'Окно повторного тестирования', 'Ответственный ИТ'],
+    participants: ['Елена Морозова', 'Виктория Румянцева', 'Артем Сафронов'],
+    outcome: 'Создан follow-up для технологической интеграции по окну тестирования.',
+    linkedTaskIds: ['TASK-2915']
+  },
+  {
+    id: 'COM-7902',
+    counterpartyId: 'ФЛ-009001',
+    type: 'Обращение',
+    subject: 'Не начислен кешбэк по СБП-операции',
+    at: '2026-08-05T10:05:00+07:00',
+    responsibleId: 'u-002',
+    summary: 'Клиент прислал чек, сумму операции 4 850 руб. и ожидание кешбэка по акции партнера.',
+    nextAction: 'Проверить правило начисления и подготовить ответ клиенту до 06.08',
+    status: 'Требует follow-up',
+    channel: 'Чат',
+    processId: 'BP-2026-0902',
+    agenda: ['Чек операции', 'Правило начисления', 'Срок ответа'],
+    participants: ['Алексей Фомин', 'Анна Лебедева'],
+    outcome: 'Обращение передано в операционный контроль для проверки начисления.',
+    linkedTaskIds: ['TASK-2904'],
+    recording: 'chat-20260805-1005.txt'
+  },
+  {
+    id: 'COM-7903',
+    counterpartyId: 'КО-009001',
+    type: 'Звонок',
+    subject: 'Подготовить звонок по договорным условиям Норд Капитал Банк',
+    at: '2026-08-06T11:00:00+07:00',
+    responsibleId: 'u-001',
+    summary: 'Плановая коммуникация перед отправкой договорных условий на подписание.',
+    nextAction: 'Согласовать с Норд Капитал Банк SLA обслуживания и дату вступления условий в силу',
+    status: 'Запланирована',
+    channel: 'Телефон',
+    processId: 'BP-2026-0910',
+    agenda: ['SLA обслуживания СБП', 'Дата вступления условий', 'Контакт подписанта'],
+    participants: ['Елена Морозова', 'Виктория Румянцева', 'Наталья Соколова']
+  },
+  {
+    id: 'COM-7904',
+    counterpartyId: 'КО-009001',
+    type: 'Встреча',
+    subject: 'Внутреннее согласование договора Норд Капитал Банк',
+    at: '2026-08-05T13:25:00+07:00',
+    responsibleId: 'u-005',
+    summary: 'Операционный контроль передал юридическому сопровождению пакет условий и список сервисов.',
+    nextAction: 'Юридическому сопровождению подтвердить особые условия и статус карточки СЭД',
+    status: 'Требует follow-up',
+    channel: 'ВКС',
+    processId: 'BP-2026-0910',
+    agenda: ['Проверка пакета', 'Особые условия', 'Карточка СЭД'],
+    participants: ['Светлана Павлова', 'Наталья Соколова'],
+    outcome: 'Создано внутреннее поручение HND-9101 и связанная задача TASK-2916.',
+    linkedTaskIds: ['TASK-2916']
+  }
+];
+
+const internalHandoffs: InternalHandoff[] = [
+  {
+    id: 'HND-9101',
+    title: 'Проверить особые условия договора Норд Капитал Банк',
+    sourceDepartment: 'Операционный контроль',
+    targetDepartment: 'Юридическое сопровождение',
+    status: 'В работе',
+    priority: 'Высокий',
+    createdAt: '2026-08-05T13:30:00+07:00',
+    dueDate: '2026-08-06',
+    responsibleId: 'u-007',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0910',
+    taskId: 'TASK-2916',
+    comment: 'Проверить SLA 16 часов по СБП, особые условия лояльности и корректность ссылки на карточку договора в СЭД.',
+    history: [
+      { at: '2026-08-05T13:30:00+07:00', actorId: 'u-005', action: 'Создано поручение', details: 'Операционный контроль передал договорные условия в юридическое сопровождение', status: 'Новая' },
+      { at: '2026-08-05T13:35:00+07:00', actorId: 'u-007', action: 'Принято в работу', details: 'Юридическое сопровождение проверяет особые условия договора', status: 'В работе' }
+    ]
+  },
+  {
+    id: 'HND-9001',
+    title: 'Подтвердить окно повторного C2B-тестирования Норд Капитал Банк',
+    sourceDepartment: 'Дирекция сопровождения участников ПС МИР',
+    targetDepartment: 'Технологическая интеграция',
+    status: 'Ожидает',
+    priority: 'Средний',
+    createdAt: '2026-08-05T09:25:00+07:00',
+    dueDate: '2026-08-06',
+    responsibleId: 'u-004',
+    counterpartyId: 'КО-009001',
+    processId: 'BP-2026-0901',
+    taskId: 'TASK-2915',
+    comment: 'По итогам встречи с Норд Капитал Банк нужно подтвердить тестовое окно 07.08 и зафиксировать ответственного ИТ.',
+    history: [{ at: '2026-08-05T09:25:00+07:00', actorId: 'u-001', action: 'Создано из коммуникации', details: 'Follow-up встречи передан технологической интеграции', status: 'Новая' }]
+  },
+  {
+    id: 'HND-7021',
+    title: 'Подготовить расчет повторности нарушения SLA ВКЦ',
+    sourceDepartment: 'Юридическое сопровождение',
+    targetDepartment: 'Операционный контроль',
+    status: 'Просрочено',
+    priority: 'Критичный',
+    createdAt: '2026-08-02T10:00:00+07:00',
+    dueDate: '2026-08-03',
+    responsibleId: 'u-005',
+    counterpartyId: 'КО-000219',
+    processId: 'BP-2026-0152',
+    taskId: 'TASK-2050',
+    comment: 'Нужно подтвердить количество повторных нарушений SLA перед отправкой уведомления и штрафа.',
+    history: [{ at: '2026-08-04T08:10:00+07:00', actorId: 'u-006', action: 'Эскалация', details: 'Поручение просрочено, процесс в риске сроков', status: 'Просрочена' }]
+  },
+  {
+    id: 'HND-7042',
+    title: 'Передать параметры акции СМС в BI',
+    sourceDepartment: 'Партнерские программы',
+    targetDepartment: 'Администрирование Целевой ИС',
+    status: 'На проверке',
+    priority: 'Средний',
+    createdAt: '2026-08-03T16:20:00+07:00',
+    dueDate: '2026-08-06',
+    responsibleId: 'u-008',
+    counterpartyId: 'ТСП-000311',
+    processId: 'BP-2026-0157',
+    comment: 'Параметры акции подготовлены, ожидается контроль публикации набора в BI.',
+    history: [{ at: '2026-08-04T10:00:00+07:00', actorId: 'u-008', action: 'Передано на проверку', details: 'Набор параметров акции загружен в BI', status: 'На проверке' }]
+  }
+];
+
+const notifications: NotificationEvent[] = [
+  {
+    id: 'NTF-301',
+    channel: 'Внутрисистемное',
+    status: 'Доставлено',
+    recipient: 'Юридическое сопровождение',
+    trigger: 'Просрочка контрольной точки',
+    objectId: 'TASK-2050',
+    at: '2026-08-04T08:10:00+07:00'
+  },
+  {
+    id: 'NTF-302',
+    channel: 'email',
+    status: 'Отправлено',
+    recipient: 'ops-control@example.corp',
+    trigger: 'Автосоздание задачи',
+    objectId: 'TASK-2062',
+    at: '2026-08-04T09:00:04+07:00'
+  },
+  {
+    id: 'NTF-303',
+    channel: 'email',
+    status: 'Ошибка',
+    recipient: 'integration-night-shift@example.corp',
+    trigger: 'Повторная технологическая проверка',
+    objectId: 'TASK-2042',
+    at: '2026-08-04T10:05:00+07:00'
+  },
+  {
+    id: 'NTF-3901',
+    channel: 'Внутрисистемное',
+    status: 'Доставлено',
+    recipient: 'Технологическая интеграция',
+    trigger: 'Автосоздание задачи проверки API-паспорта',
+    objectId: 'TASK-2902',
+    at: '2026-08-05T11:15:05+07:00'
+  },
+  {
+    id: 'NTF-3902',
+    channel: 'email',
+    status: 'Отправлено',
+    recipient: 'ops-control@example.corp',
+    trigger: 'Передача клиентского обращения в операционный контроль',
+    objectId: 'TASK-2904',
+    at: '2026-08-05T10:34:06+07:00'
+  }
+];
+
+const integrations: IntegrationExchange[] = [
+  {
+    id: 'INT-501',
+    system: 'СЭД',
+    status: 'Успешно',
+    lastSync: '2026-07-30T09:16:00+07:00',
+    objectType: 'Контрагент',
+    objectId: 'КО-000184',
+    operation: 'Проверка зарегистрированных обращений',
+    records: 2,
+    errors: [],
+    log: [
+      { at: '2026-07-30T09:16:00+07:00', level: 'INFO', message: 'Запрос карточки контрагента выполнен' },
+      { at: '2026-07-30T09:16:02+07:00', level: 'INFO', message: 'Найдено 2 входящих обращения' }
+    ]
+  },
+  {
+    id: 'INT-502',
+    system: 'DWH',
+    status: 'Ожидает',
+    lastSync: '2026-07-30T17:25:00+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0148',
+    operation: 'Передача метрик процесса',
+    records: 0,
+    errors: [],
+    log: [{ at: '2026-07-30T17:25:00+07:00', level: 'INFO', message: 'Ожидание завершения технологического этапа' }]
+  },
+  {
+    id: 'INT-503',
+    system: 'Email Gateway',
+    status: 'Ошибка',
+    lastSync: '2026-08-04T08:11:00+07:00',
+    objectType: 'Задача',
+    objectId: 'TASK-2050',
+    operation: 'Отправка эскалационного уведомления',
+    records: 1,
+    errors: ['Групповой адрес юридического блока временно недоступен'],
+    log: [
+      { at: '2026-08-04T08:11:00+07:00', level: 'ERROR', message: 'SMTP 451 temporary local problem' }
+    ]
+  },
+  {
+    id: 'INT-504',
+    system: 'BI',
+    status: 'Успешно',
+    lastSync: '2026-08-03T08:00:00+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0157',
+    operation: 'Передача параметров маркетинговой акции',
+    records: 1,
+    errors: [],
+    log: [{ at: '2026-08-03T08:00:00+07:00', level: 'INFO', message: 'Параметры акции переданы в витрину CRM_OPER' }]
+  },
+  {
+    id: 'INT-505',
+    system: 'Jira',
+    status: 'В процессе',
+    lastSync: '2026-08-04T09:01:00+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0160',
+    operation: 'Создание связанной технологической задачи',
+    records: 1,
+    errors: [],
+    log: [{ at: '2026-08-04T09:01:00+07:00', level: 'INFO', message: 'Создан draft задачи INT-SBP-8841' }]
+  },
+  {
+    id: 'INT-506',
+    system: 'Confluence',
+    status: 'Ошибка',
+    lastSync: '2026-08-03T16:39:00+07:00',
+    objectType: 'Импорт',
+    objectId: 'ПР-000077',
+    operation: 'Миграция контактных лиц из wiki',
+    records: 27,
+    errors: ['3 дубля по email', '1 контакт без роли'],
+    log: [
+      { at: '2026-08-03T16:39:00+07:00', level: 'WARN', message: 'Найдены дубли по email' },
+      { at: '2026-08-03T16:39:03+07:00', level: 'ERROR', message: 'Запись 18: отсутствует обязательное поле "Роль контакта"' }
+    ]
+  },
+  {
+    id: 'INT-507',
+    system: 'Телефония',
+    status: 'Успешно',
+    lastSync: '2026-08-03T19:25:03+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0168',
+    operation: 'Распознавание входящего обращения и открытие карточки ФЛ',
+    records: 1,
+    errors: [],
+    log: [
+      { at: '2026-08-03T19:25:01+07:00', level: 'INFO', message: 'Номер клиента сопоставлен с ФЛ-000002' },
+      { at: '2026-08-03T19:25:03+07:00', level: 'INFO', message: 'Создано обращение категории "Спорная операция СБП"' }
+    ]
+  },
+  {
+    id: 'INT-508',
+    system: 'DWH',
+    status: 'Ожидает',
+    lastSync: '2026-08-04T10:15:04+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0171',
+    operation: 'Проверка дублей профиля и срока действия согласий',
+    records: 2,
+    errors: [],
+    log: [
+      { at: '2026-08-04T10:15:02+07:00', level: 'INFO', message: 'Дублей профиля не найдено' },
+      { at: '2026-08-04T10:15:04+07:00', level: 'INFO', message: 'Согласие ПДн попало в контрольный горизонт актуализации' }
+    ]
+  },
+  {
+    id: 'INT-5901',
+    system: 'Jira',
+    status: 'В процессе',
+    lastSync: '2026-08-05T11:16:00+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0901',
+    operation: 'Создание технологической задачи по API-паспорту СБП',
+    records: 1,
+    errors: [],
+    log: [
+      { at: '2026-08-05T11:15:08+07:00', level: 'INFO', message: 'Создана задача INT-SBP-9901 для проверки тестового стенда Норд Капитал Банк' },
+      { at: '2026-08-05T11:16:00+07:00', level: 'INFO', message: 'Ответственный ИТ-контакт передан в карточку задачи' }
+    ]
+  },
+  {
+    id: 'INT-5902',
+    system: 'Телефония',
+    status: 'Успешно',
+    lastSync: '2026-08-05T10:05:03+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0902',
+    operation: 'Распознавание обращения и открытие карточки ФЛ',
+    records: 1,
+    errors: [],
+    log: [
+      { at: '2026-08-05T10:05:01+07:00', level: 'INFO', message: 'Клиент найден по loyaltyId MIR-900144' },
+      { at: '2026-08-05T10:05:03+07:00', level: 'INFO', message: 'Создано обращение категории "Не начислен кешбэк по операции СБП"' }
+    ]
+  },
+  {
+    id: 'INT-5910',
+    system: 'СЭД',
+    status: 'Ожидает',
+    lastSync: '2026-08-05T13:33:00+07:00',
+    objectType: 'Процесс',
+    objectId: 'BP-2026-0910',
+    operation: 'Получение статуса подписания договора Норд Капитал Банк',
+    records: 1,
+    errors: [],
+    log: [
+      { at: '2026-08-05T13:32:00+07:00', level: 'INFO', message: 'В CRM сохранена регистрационная карточка договора ДОГ-0910' },
+      { at: '2026-08-05T13:33:00+07:00', level: 'INFO', message: 'Ожидается статус подписания из СЭД, текст договора не хранится в CRM' }
+    ]
+  }
+];
+
+const dictionaries: Dictionary[] = [
+  {
+    id: 'dict-counterparty',
+    name: 'Типы контрагентов',
+    description: 'Классификация юридических лиц и партнеров в единой базе.',
+    ownerId: 'u-008',
+    fields: [
+      { id: 'f-code', name: 'Код', type: 'Строка', required: true },
+      { id: 'f-name', name: 'Наименование', type: 'Строка', required: true },
+      { id: 'f-risk', name: 'Коэффициент риска', type: 'Число', required: false }
+    ],
+    records: [
+      { code: 'КО', name: 'Кредитная организация', risk: 1.2 },
+      { code: 'НКО', name: 'Небанковская кредитная организация', risk: 1.1 },
+      { code: 'ТСП', name: 'Торгово-сервисное предприятие', risk: 0.9 },
+      { code: 'ПСП', name: 'Платежная система - партнер', risk: 1.0 },
+      { code: 'ФЛ', name: 'Физическое лицо', risk: 0.8 }
+    ]
+  },
+  {
+    id: 'dict-services',
+    name: 'Сервисы и продукты',
+    description: 'Продукты и сервисы, к которым подключаются контрагенты.',
+    ownerId: 'u-008',
+    fields: [
+      { id: 'f-service', name: 'Сервис', type: 'Строка', required: true },
+      { id: 'f-owner', name: 'Подразделение-владелец', type: 'Справочник', required: true, source: 'Подразделения' },
+      { id: 'f-sla', name: 'Норматив SLA, часов', type: 'Число', required: true }
+    ],
+    records: [
+      { service: 'ПС МИР', owner: 'Операционный контроль', sla: 24 },
+      { service: 'СБП', owner: 'Технологическая интеграция', sla: 16 },
+      { service: 'Программа лояльности', owner: 'Партнерские программы', sla: 48 },
+      { service: 'Транспортная платформа', owner: 'Технологическая интеграция', sla: 24 }
+    ]
+  },
+  {
+    id: 'dict-violations',
+    name: 'Типы нарушений',
+    description: 'Основания для уведомлений, предписаний и штрафов.',
+    ownerId: 'u-007',
+    fields: [
+      { id: 'f-violation', name: 'Нарушение', type: 'Строка', required: true },
+      { id: 'f-base', name: 'Базовая сумма', type: 'Число', required: true },
+      { id: 'f-repeat', name: 'Коэффициент повторности', type: 'Число', required: true },
+      { id: 'f-amount', name: 'Итоговая сумма', type: 'Формула', required: false, formula: 'Базовая сумма * Коэффициент повторности' }
+    ],
+    records: [
+      { violation: 'Нарушение SLA обработки СБП', base: 125000, repeat: 1.4, amount: 175000 },
+      { violation: 'Несвоевременное обновление контактов', base: 30000, repeat: 1.0, amount: 30000 }
+    ]
+  }
+];
+
+const wikiArticleTexts = {
+  processes: `
+## Назначение
+Раздел описывает общий порядок ведения операционных процессов CRM+BPM. Инструкция нужна куратору, исполнителю подразделения и руководителю процесса, чтобы одинаково понимать старт процесса, обязательные задачи, контроль SLA и фиксацию результата.
+
+## Когда применять
+- запуск подключения юридического лица к сервису;
+- обработка обращения физического лица;
+- актуализация профиля, реквизитов и контактных лиц;
+- выставление уведомления или штрафа;
+- договорное сопровождение без переноса текста договора из СЭД;
+- запуск внутреннего поручения подразделению.
+
+## Базовая логика маршрута
+1. Куратор открывает карточку клиента или контрагента и запускает подходящий шаблон процесса.
+2. Система создает первую задачу только для группы, указанной в первом этапе.
+3. Исполнитель принимает задачу в работу, заполняет обязательные результаты и закрывает этап.
+4. После закрытия обязательного этапа создается следующая задача маршрута.
+5. Руководитель процесса контролирует просрочки, возвраты и эскалации.
+6. Завершенный процесс попадает в историю карточки, отчеты и журнал действий.
+
+| Объект | Где используется | Что обязательно проверить |
+|---|---|---|
+| Контрагент или клиент | Старт процесса, задачи, документы, коммуникации | Статус, куратор, контакты, профильные признаки |
+| Процесс | Маршрут и контроль SLA | Текущий этап, группа исполнителя, срок, статус |
+| Задача | Исполнение этапа | Обязательные результаты, комментарий, итоговое решение |
+| Документ | Подтверждение операции | Бизнес-контекст, версия, связь с сервисом или договором |
+| Коммуникация | Встреча, звонок, письмо, обращение | Итог, следующий шаг, ответственный, срок follow-up |
+
+## Правила статусов
+- Новая: задача создана, но исполнитель еще не начал работу.
+- В работе: исполнитель принял задачу и несет ответственность за результат.
+- Ожидание: требуется ответ контрагента, клиента или внешней системы.
+- На проверке: результат передан на контроль качества или руководителю.
+- Выполнена: обязательные результаты заполнены, этап закрыт.
+- Просрочена: срок SLA нарушен, требуется контроль руководителя.
+
+> Контрольный принцип: следующая задача процесса не должна появляться раньше завершения предыдущего обязательного этапа.
+`.trim(),
+  sbp: `
+## Цель инструкции
+Регламент применяется при подключении юридического лица к сервису СБП. Цель - провести контрагента от проверки профиля до промышленного запуска без ручной передачи статуса между подразделениями.
+
+## Входные условия
+- в карточке ЮЛ заполнены ИНН, КПП, ОГРН, основной контакт и подразделение-владелец;
+- выбран сервис подключения: СБП C2B, B2C или технологический контур партнера;
+- есть плановая дата запуска и контакт ИТ со стороны контрагента;
+- документы подключения привязаны к карточке или процессу.
+
+## Маршрут процесса
+| Этап | Исполнитель | SLA | Результат |
+|---|---|---|---|
+| Проверка единого профиля | Операционный контроль | 8 часов | Подтверждены реквизиты, контакты и связанные сервисы |
+| Технологическая проверка | Технологическая интеграция | 16 часов | Проверены API-паспорт, тестовый стенд и контакт ИТ |
+| Промышленный запуск | Операционный контроль | 24 часа | Зафиксированы дата запуска, метрики первого дня и ответственный |
+
+## Порядок работы куратора
+1. Открыть карточку ЮЛ и проверить блок основных контактов.
+2. Нажать Запустить процесс и выбрать шаблон подключения к сервису СБП.
+3. Указать плановую дату запуска и понятное название процесса.
+4. Открыть первую задачу и проверить обязательные результаты профиля.
+5. После выполнения этапа убедиться, что следующая задача создана технологической интеграции.
+
+## Порядок работы технологической интеграции
+1. Принять задачу в работу.
+2. Проверить API-паспорт, тестовый стенд и канал связи с ИТ-контактом.
+3. Зафиксировать результат проверки в комментарии.
+4. Выполнить этап и передать процесс на промышленный запуск.
+
+## Если есть отклонение
+- если API-паспорт неактуален, выбрать итоговое решение Запросить данные;
+- если тестовый стенд недоступен, перевести задачу в Ожидание и указать контакт для повторной проверки;
+- если срок SLA приближается к нарушению, руководитель процесса видит риск на Главной и в реестре задач.
+
+> Завершением процесса считается не факт технической проверки, а подтвержденный промышленный запуск с метриками первого дня.
+`.trim(),
+  appeal: `
+## Назначение
+Инструкция описывает обработку обращения физического лица: от регистрации контакта до ответа клиенту и контроля удовлетворенности. Процесс применяется для обращений по СБП, кешбэку, спорным операциям, справкам и актуализации данных.
+
+## Каналы поступления
+- звонок в контактный центр;
+- email;
+- чат;
+- форма сайта;
+- офис банка или обращение через операциониста.
+
+## Обязательные данные обращения
+| Поле | Зачем нужно |
+|---|---|
+| Категория обращения | Определяет SLA и маршрут |
+| Канал обращения | Нужен для ответа клиенту и истории коммуникаций |
+| Согласие ПДн | Обязательно для обработки профиля ФЛ |
+| Описание ситуации | Передается исполнителю задачи |
+| Срок ответа клиенту | Контролируется руководителем процесса |
+
+## Порядок обработки
+1. Зарегистрировать обращение и связать его с карточкой ФЛ.
+2. Проверить согласие на обработку персональных данных.
+3. Выбрать категорию обращения и канал ответа.
+4. Передать задачу в операционный контроль, если нужна проверка операции или партнера.
+5. Подготовить решение, зафиксировать комментарий и приложить подтверждающий документ.
+6. Закрыть обращение, отправить ответ и зафиксировать удовлетворенность клиента.
+
+## Правила ответа клиенту
+- ответ должен содержать результат проверки, срок исполнения следующего шага и канал обратной связи;
+- если решение зависит от другого банка или партнера, клиенту сообщается контрольный срок;
+- если обращение спорное, задача переводится в На проверке и контролируется руководителем процесса.
+
+> Для ФЛ нельзя запускать ЮЛ-процессы подключения сервисов, штрафов и договорного обслуживания. Доступны только клиентские обращения и актуализация профиля/согласий.
+`.trim(),
+  profile: `
+## Назначение
+Единый профиль нужен, чтобы операционист видел актуальные данные ФЛ и ЮЛ в одной логике, но с разным составом полей. Профиль используется в процессах, задачах, документах, коммуникациях и отчетах.
+
+## Общие правила ведения
+1. Любое изменение карточки фиксируется в журнале действий.
+2. Основной контакт должен быть указан до запуска процесса, где нужен ответ от контрагента или клиента.
+3. Документы прикрепляются с бизнес-контекстом: к сервису, договору, задаче, коммуникации или процессу.
+4. Контрольная дата используется для плановой проверки профиля или договорных параметров.
+5. При неполном профиле куратор создает задачу актуализации.
+
+## Отличия ФЛ и ЮЛ
+| Признак | ФЛ | ЮЛ |
+|---|---|---|
+| Идентификация | Документ, дата рождения, клиентский ID, маскированная карта | ИНН, КПП, ОГРН, тип организации |
+| Контакты | Предпочтительный канал и согласие ПДн | Контактное лицо, должность, email, телефон |
+| Процессы | Обращения и согласия | Сервисы, договоры, реквизиты, уведомления |
+| Контроль | Срок ответа клиенту и согласие ПДн | SLA сервисов, документы, официальные запросы |
+
+## Что проверять перед запуском процесса
+- статус карточки не Архив;
+- заполнен куратор;
+- указан основной контакт;
+- есть связанный сервис или причина обращения;
+- документы привязаны к правильному объекту;
+- нет просроченной контрольной даты без задачи.
+`.trim(),
+  profileIndividual: `
+## Цель проверки
+Проверка профиля ФЛ нужна перед обработкой обращения, ответом по спорной операции, актуализацией согласий или передачей данных в целевую систему.
+
+## Рабочий чек-лист
+1. Сверить ФИО и дату рождения с документом в карточке.
+2. Проверить статус согласия ПДн.
+3. Проверить предпочтительный канал связи.
+4. Убедиться, что маскированная карта или клиентский идентификатор относится к текущему клиенту.
+5. Посмотреть активные обращения и коммуникации за последние 30 дней.
+6. Если согласие истекает, запустить процесс актуализации профиля и согласий ФЛ.
+
+## Когда нельзя продолжать
+- согласие ПДн не получено;
+- клиент просит изменить канал ответа, но канал не подтвержден;
+- по клиенту есть дубли профиля;
+- обращение требует документа, которого нет в карточке.
+
+## Итог задачи
+| Результат | Что делает система |
+|---|---|
+| Подтвердить | Задача закрывается, процесс переходит дальше |
+| Запросить данные | Задача переводится в ожидание, создается коммуникация или follow-up |
+| Вернуть на доработку | Фиксируется причина возврата и комментарий для инициатора |
+
+> В комментарии к задаче указывайте только деловую суть: что проверено, какой результат получен и какой следующий шаг нужен клиенту.
+`.trim(),
+  profileLegal: `
+## Цель проверки
+Инструкция используется при проверке юридического лица перед подключением сервиса, договорным процессом, актуализацией реквизитов или официальным уведомлением.
+
+## Обязательные реквизиты
+- ИНН;
+- КПП;
+- ОГРН;
+- юридический адрес;
+- основной контакт и должность;
+- подразделение-владелец;
+- список подключенных или планируемых сервисов.
+
+## Порядок проверки
+1. Сверить реквизиты карточки с последним подтвержденным документом.
+2. Проверить, что основной контакт относится к текущему контрагенту и имеет рабочий email/телефон.
+3. Открыть вкладку Документы и убедиться, что каждый файл привязан к процессу, сервису или договору.
+4. Проверить блок продуктов и сервисов: статус, владелец, SLA и количество инцидентов.
+5. Если есть официальные запросы, просрочки или ошибки обменов, открыть источники данных и определить следующий шаг.
+6. При неполных данных создать задачу Запрос данных/документов или запустить процесс актуализации реквизитов ЮЛ.
+
+## Контрольные признаки риска
+| Признак | Что означает | Действие |
+|---|---|---|
+| Просроченная контрольная дата | Плановая проверка не выполнена | Создать контрольную задачу |
+| Ошибка обмена | Неуспешный обмен с СЭД, DWH, Email Gateway или Jira | Повторить обмен или передать администратору |
+| Инциденты сервиса | По сервису есть зарегистрированные нарушения SLA | Проверить сервисную задачу и ответственного |
+| Официальные запросы | Есть письма или документы, требующие ответа | Проверить срок и зафиксировать коммуникацию |
+`.trim(),
+  communicationTemplates: `
+## Назначение
+Раздел содержит правила деловой коммуникации с клиентами и контрагентами: как планировать звонки и встречи, фиксировать итог, создавать follow-up задачи и использовать утвержденные формулировки.
+
+## Что фиксировать по каждому контакту
+- тип контакта: звонок, встреча, письмо или обращение;
+- канал: телефон, ВКС, email, офис, чат или форма сайта;
+- тему контакта;
+- участников;
+- краткий итог;
+- следующий шаг;
+- ответственного и срок follow-up.
+
+## Шаблон итога звонка
+| Блок | Формулировка |
+|---|---|
+| Результат | Подтверждена готовность к промышленному запуску СБП 14.08.2026 |
+| Риски | Контрагент ожидает финальную дату от ИТ-подразделения |
+| Следующий шаг | Получить письмо-подтверждение и приложить его к процессу |
+| Ответственный | Куратор CRM |
+
+## Правила follow-up
+1. Если после контакта есть действие, создается задача.
+2. Если действие относится к процессу, задача связывается с процессом и контрагентом.
+3. Если нужен ответ другого подразделения, создается поручение.
+4. Если контакт завершает вопрос, статус коммуникации меняется на Проведена.
+
+> Хорошая запись коммуникации должна отвечать на три вопроса: о чем договорились, кто отвечает и до какого срока.
+`.trim(),
+  exchangeRetry: `
+## Назначение
+Инструкция используется администратором BPM при ошибке межсистемного обмена. Бизнес-пользователь видит итоговый статус в задаче или процессе, а техническая диагностика выполняется в контуре администратора.
+
+## Основные источники обменов
+- СЭД: регистрация договоров, карточек документов и статусов подписания;
+- Email Gateway: отправка уведомлений и запросов данных;
+- DWH/BI: передача итоговых метрик процессов и задач;
+- Jira Integration: сервисные инциденты и технические запросы.
+
+## Порядок диагностики
+1. Открыть Тех. обмены и найти запись по объекту: процесс, задача, документ или коммуникация.
+2. Проверить систему-источник, операцию, дату последнего обмена и текст ошибки.
+3. Открыть лог и определить, ошибка временная или требует изменения данных.
+4. При временной ошибке нажать Повторить обмен.
+5. При ошибке данных вернуть задачу исполнителю или создать поручение ответственному подразделению.
+6. После успешного повтора проверить, что история объекта обновилась.
+
+## Типовые решения
+| Ошибка | Причина | Действие |
+|---|---|---|
+| Timeout | Система-получатель не ответила | Повторить обмен |
+| Validation failed | Не заполнено обязательное поле | Вернуть задачу на уточнение данных |
+| Duplicate object | Найден дубль карточки | Передать на проверку профиля |
+| Access denied | Нет прав у сервисной учетной записи | Эскалировать администратору интеграции |
+
+> Повтор обмена не должен скрывать бизнес-проблему. Если ошибка вызвана неполными данными, сначала исправляется карточка или задача.
+`.trim(),
+  communicationProcess: `
+## Цель инструкции
+Инструкция помогает куратору вести встречи, звонки и письма как управляемый процесс, а не как личные заметки. Каждая коммуникация связывается с клиентом или контрагентом, при необходимости с процессом и задачей.
+
+## Планирование контакта
+1. Открыть раздел Коммуникации или вкладку Коммуникации в карточке.
+2. Нажать Запланировать.
+3. Выбрать контрагента или клиента.
+4. Указать тип, канал, дату, тему и участников.
+5. Если контакт относится к процессу, выбрать связанный процесс.
+6. Оставить создание follow-up задачи, если после контакта нужен контроль действия.
+
+## Фиксация итога
+- кратко описать, что обсуждалось;
+- указать принятое решение;
+- зафиксировать следующий шаг;
+- назначить ответственного;
+- указать срок;
+- приложить файл, если итог подтвержден документом.
+
+## Когда создавать задачу
+| Ситуация | Тип задачи |
+|---|---|
+| Контрагент должен прислать документы | Запрос данных/документов |
+| Нужно проверить сервисный сбой | Сервисный инцидент |
+| Требуется ответ другого подразделения | Поручение подразделению |
+| Нужно проконтролировать срок ответа | Follow-up по коммуникации |
+
+> Если действие не требует работы после контакта, коммуникация просто фиксируется как проведенная и остается в истории карточки.
+`.trim(),
+  handoffs: `
+## Назначение
+Поручение используется, когда в рамках текущей задачи или процесса нужен вклад другого внутреннего подразделения. Это не следующий этап маршрута, а управляемый запрос с адресатом, сроком и результатом.
+
+## Когда создавать поручение
+- юридическому сопровождению нужно уточнить особые условия договора;
+- технологической интеграции нужен повторный прогон тестового сценария;
+- операционному контролю нужно сверить реквизиты или документы;
+- контактному центру нужно получить подтверждение от клиента;
+- администратору целевой системы нужно проверить публикацию данных.
+
+## Порядок создания
+1. Открыть задачу или процесс, где возникла потребность во внутреннем запросе.
+2. Нажать Поручение.
+3. Указать тему, подразделение-отправитель, подразделение-получатель, срок и приоритет.
+4. Оставить создание связанной задачи, если подразделение должно выполнить действие.
+5. Сохранить поручение и проверить, что оно появилось в реестре Поручения подразделениям.
+
+## Как закрывается поручение
+| Статус | Кто меняет | Что означает |
+|---|---|---|
+| Ожидает | Инициатор | Поручение создано и направлено адресату |
+| В работе | Получатель | Подразделение приняло запрос |
+| На проверке | Получатель | Результат подготовлен и ждет подтверждения |
+| Закрыто | Инициатор или руководитель | Результат принят |
+
+> Поручение должно быть связано с контрагентом, процессом или задачей. Иначе по нему сложно восстановить бизнес-контекст.
+`.trim(),
+  contract: `
+## Цель процесса
+Договорный процесс в CRM контролирует бизнес-состояние договорных условий обслуживания ЮЛ. Текст договора, юридически значимое подписание и хранение оригинала остаются в СЭД.
+
+## Что ведет CRM
+- договорной пакет и перечень сервисов;
+- реквизиты и контакт подписанта;
+- тарифный пакет, SLA и особые условия;
+- статус подписания из СЭД;
+- регистрационный номер и дата вступления в силу;
+- контрольная дата проверки договорных параметров.
+
+## Маршрут
+| Этап | Исполнитель | Результат |
+|---|---|---|
+| Проверка договорного пакета | Операционный контроль | Подтверждены реквизиты, сервисы и подписант |
+| Согласование условий обслуживания | Юридическое сопровождение | Зафиксированы тариф, SLA и особые условия |
+| Контроль подписания и регистрации | Юридическое сопровождение | Получен номер договора и статус СЭД |
+| Активация договорных параметров | Операционный контроль | Параметры сервиса активированы в CRM |
+
+## Как работать с документами
+1. Открыть вкладку Документы в карточке контрагента или процесса.
+2. Проверить, к какому сервису и процессу относится документ.
+3. Убедиться, что статус документа соответствует этапу процесса.
+4. При ошибке СЭД открыть связанный обмен и повторить его под ролью администратора BPM.
+5. После регистрации договора заполнить номер и дату вступления в силу.
+
+## Граница с СЭД
+CRM показывает бизнес-статус и управляет задачами. СЭД остается системой юридического хранения, согласования текста и подписания договора.
+
+> Завершать договорный процесс можно только после активации договорных параметров и установки контрольной даты.
+`.trim()
+};
+
+const wiki: WikiPage[] = [
+  {
+    id: 'WIKI-101',
+    space: 'CRM+BPM',
+    title: 'Процессы CRM и BPM',
+    path: 'CRM+BPM / Процессы CRM и BPM',
+    content: wikiArticleTexts.processes,
+    updatedAt: '2026-08-01T09:00:00+07:00',
+    authorId: 'u-006',
+    status: 'Опубликована',
+    tags: ['BPM', 'регламенты', 'задачи'],
+    versions: [
+      { id: 'WIKI-101-v3', label: 'v3 от 01.08.2026', at: '2026-08-01T09:00:00+07:00', authorId: 'u-006', content: 'Актуальная структура раздела CRM+BPM с маршрутами процессов и SLA.', changeSummary: 'Добавлены ссылки на клиентские обращения и актуализацию профиля.' },
+      { id: 'WIKI-101-v2', label: 'v2 от 18.07.2026', at: '2026-07-18T12:20:00+07:00', authorId: 'u-008', content: 'Структура раздела CRM+BPM для подключения сервисов и маркетинговых акций.', changeSummary: 'Обновлена навигация по процессам.' }
+    ],
+    attachments: [
+      { id: 'WATT-101', name: 'process-map-crm-bpm.drawio', format: 'DRAWIO', size: '76 КБ', uploadedAt: '2026-08-01T09:10:00+07:00', ownerId: 'u-008', kind: 'Схема процесса', indexedText: 'Схема CRM+BPM: старт из карточки, автосоздание задачи, проверка обязательных результатов, переход этапа, завершение процесса, журнал действий.' }
+    ]
+  },
+  {
+    id: 'WIKI-102',
+    space: 'CRM+BPM',
+    parentId: 'WIKI-101',
+    title: 'Регламент подключения контрагента к СБП',
+    path: 'CRM+BPM / Процессы CRM и BPM / Подключение СБП',
+    content: wikiArticleTexts.sbp,
+    updatedAt: '2026-07-26T18:20:00+07:00',
+    authorId: 'u-004',
+    status: 'Опубликована',
+    tags: ['СБП', 'подключение', 'API-паспорт', 'SLA'],
+    versions: [
+      { id: 'WIKI-102-v4', label: 'v4 от 26.07.2026', at: '2026-07-26T18:20:00+07:00', authorId: 'u-004', content: 'Добавлены критерии проверки тестового контура и порядок передачи в промышленный запуск.', changeSummary: 'Уточнен технологический этап.' },
+      { id: 'WIKI-102-v3', label: 'v3 от 10.06.2026', at: '2026-06-10T11:00:00+07:00', authorId: 'u-005', content: 'Регламент подключения СБП с профилем контрагента и API-паспортом.', changeSummary: 'Добавлены обязательные поля профиля.' },
+      { id: 'WIKI-102-v2', label: 'v2 от 14.03.2026', at: '2026-03-14T15:30:00+07:00', authorId: 'u-008', content: 'Первичная версия регламента подключения СБП.', changeSummary: 'Базовый маршрут процесса.' }
+    ],
+    attachments: [
+      { id: 'WATT-102', name: 'bpmn-connect-sbp.png', format: 'PNG', size: '214 КБ', uploadedAt: '2026-07-26T18:25:00+07:00', ownerId: 'u-004', kind: 'Схема процесса', indexedText: 'BPMN подключения СБП: профиль контрагента, API-паспорт, тестовый стенд, промышленный запуск, DWH, СЭД, Email Gateway.' },
+      { id: 'WATT-103', name: 'sla-rules.xlsx', format: 'XLSX', size: '48 КБ', uploadedAt: '2026-07-26T18:26:00+07:00', ownerId: 'u-005', kind: 'Таблица', indexedText: 'Таблица SLA подключения СБП: профиль 8 часов, технологическая проверка 16 часов, промышленный запуск 24 часа, эскалация руководителю.' }
+    ]
+  },
+  {
+    id: 'WIKI-103',
+    space: 'CRM+BPM',
+    parentId: 'WIKI-101',
+    title: 'Обработка обращения клиента',
+    path: 'CRM+BPM / Процессы CRM и BPM / Обработка обращения клиента',
+    content: wikiArticleTexts.appeal,
+    updatedAt: '2026-08-03T10:15:00+07:00',
+    authorId: 'u-002',
+    status: 'Опубликована',
+    tags: ['ФЛ', 'обращение', 'ПДн', 'контактный центр'],
+    versions: [
+      { id: 'WIKI-103-v2', label: 'v2 от 03.08.2026', at: '2026-08-03T10:15:00+07:00', authorId: 'u-002', content: 'Добавлен контроль удовлетворенности и правила эскалации спорных операций.', changeSummary: 'Расширен этап закрытия обращения.' },
+      { id: 'WIKI-103-v1', label: 'v1 от 20.07.2026', at: '2026-07-20T13:40:00+07:00', authorId: 'u-005', content: 'Базовая инструкция обработки клиентских обращений.', changeSummary: 'Первичная публикация.' }
+    ],
+    attachments: [
+      { id: 'WATT-104', name: 'appeal-classification.csv', format: 'CSV', size: '18 КБ', uploadedAt: '2026-08-03T10:20:00+07:00', ownerId: 'u-002', kind: 'Таблица', indexedText: 'Классификация обращений ФЛ: кешбэк, спорная операция СБП, справка по операциям, актуализация профиля, норматив SLA и канал ответа.' },
+      { id: 'WATT-105', name: 'client-answer-template.docx', format: 'DOCX', size: '62 КБ', uploadedAt: '2026-08-03T10:22:00+07:00', ownerId: 'u-002', kind: 'Документ', indexedText: 'Шаблон ответа клиенту: результат проверки, срок исполнения, канал обратной связи, номер обращения, дальнейший шаг.' }
+    ]
+  },
+  {
+    id: 'WIKI-104',
+    space: 'Операционный контроль',
+    title: 'Контрагенты и единый профиль',
+    path: 'Операционный контроль / Контрагенты и единый профиль',
+    content: wikiArticleTexts.profile,
+    updatedAt: '2026-08-01T12:00:00+07:00',
+    authorId: 'u-005',
+    status: 'Опубликована',
+    tags: ['контрагенты', 'профиль', 'ФЛ', 'ЮЛ'],
+    versions: [
+      { id: 'WIKI-104-v7', label: 'v7 от 01.08.2026', at: '2026-08-01T12:00:00+07:00', authorId: 'u-005', content: 'Актуализированы правила проверки профиля ФЛ и ЮЛ.', changeSummary: 'Добавлены признаки ФЛ.' },
+      { id: 'WIKI-104-v6', label: 'v6 от 05.07.2026', at: '2026-07-05T16:10:00+07:00', authorId: 'u-006', content: 'Профиль считается достаточным при заполнении реквизитов, контакта и сервисов.', changeSummary: 'Уточнены критерии полноты.' }
+    ],
+    attachments: [
+      { id: 'WATT-106', name: 'profile-checklist.pdf', format: 'PDF', size: '132 КБ', uploadedAt: '2026-08-01T12:05:00+07:00', ownerId: 'u-005', kind: 'Документ', indexedText: 'Чек-лист единого профиля: идентификация ФЛ, реквизиты ЮЛ, основной контакт, документы, контрольная дата, риск дублей.' }
+    ]
+  },
+  {
+    id: 'WIKI-105',
+    space: 'Операционный контроль',
+    parentId: 'WIKI-104',
+    title: 'Проверка профиля ФЛ',
+    path: 'Операционный контроль / Контрагенты и единый профиль / Проверка профиля ФЛ',
+    content: wikiArticleTexts.profileIndividual,
+    updatedAt: '2026-08-04T09:35:00+07:00',
+    authorId: 'u-001',
+    status: 'Опубликована',
+    tags: ['ФЛ', 'ПДн', 'актуализация', 'операционист'],
+    versions: [
+      { id: 'WIKI-105-v1', label: 'v1 от 04.08.2026', at: '2026-08-04T09:35:00+07:00', authorId: 'u-001', content: 'Инструкция проверки профиля физического лица и согласий ПДн.', changeSummary: 'Первичная публикация для CRM.' }
+    ],
+    attachments: [
+      { id: 'WATT-107', name: 'personal-data-consent-template.docx', format: 'DOCX', size: '54 КБ', uploadedAt: '2026-08-04T09:40:00+07:00', ownerId: 'u-001', kind: 'Документ', indexedText: 'Шаблон согласия ПДн: цель обработки, срок действия, канал подтверждения, отзыв согласия, фиксация в CRM.' }
+    ]
+  },
+  {
+    id: 'WIKI-106',
+    space: 'Операционный контроль',
+    parentId: 'WIKI-104',
+    title: 'Проверка профиля ЮЛ',
+    path: 'Операционный контроль / Контрагенты и единый профиль / Проверка профиля ЮЛ',
+    content: wikiArticleTexts.profileLegal,
+    updatedAt: '2026-08-04T10:05:00+07:00',
+    authorId: 'u-005',
+    status: 'Опубликована',
+    tags: ['ЮЛ', 'реквизиты', 'контроль', 'контрагент'],
+    versions: [
+      { id: 'WIKI-106-v1', label: 'v1 от 04.08.2026', at: '2026-08-04T10:05:00+07:00', authorId: 'u-005', content: 'Инструкция проверки юридического лица в едином профиле.', changeSummary: 'Первичная публикация для CRM.' }
+    ],
+    attachments: [
+      { id: 'WATT-108', name: 'legal-profile-checklist.xlsx', format: 'XLSX', size: '39 КБ', uploadedAt: '2026-08-04T10:10:00+07:00', ownerId: 'u-005', kind: 'Таблица', indexedText: 'Чек-лист ЮЛ: ИНН, КПП, ОГРН, контакт подписанта, сервисы, официальные запросы, ошибки обменов, контрольная дата.' }
+    ]
+  },
+  {
+    id: 'WIKI-107',
+    space: 'Шаблоны коммуникаций',
+    title: 'Ответы клиентам и контрагентам',
+    path: 'Шаблоны коммуникаций / Ответы клиентам и контрагентам',
+    content: wikiArticleTexts.communicationTemplates,
+    updatedAt: '2026-08-02T15:00:00+07:00',
+    authorId: 'u-003',
+    status: 'Опубликована',
+    tags: ['шаблоны', 'коммуникации', 'email', 'телефония'],
+    versions: [
+      { id: 'WIKI-107-v2', label: 'v2 от 02.08.2026', at: '2026-08-02T15:00:00+07:00', authorId: 'u-003', content: 'Добавлены шаблоны запросов данных и закрытия обращения.', changeSummary: 'Расширены шаблоны ответов.' },
+      { id: 'WIKI-107-v1', label: 'v1 от 18.07.2026', at: '2026-07-18T10:15:00+07:00', authorId: 'u-002', content: 'Базовые шаблоны клиентских коммуникаций.', changeSummary: 'Первичная публикация.' }
+    ],
+    attachments: [
+      { id: 'WATT-109', name: 'email-answer-templates.docx', format: 'DOCX', size: '88 КБ', uploadedAt: '2026-08-02T15:05:00+07:00', ownerId: 'u-003', kind: 'Документ', indexedText: 'Шаблоны email: запрос документов, подтверждение запуска сервиса, ответ по обращению, уведомление о контрольном сроке.' },
+      { id: 'WATT-110', name: 'call-script-appeals.pdf', format: 'PDF', size: '116 КБ', uploadedAt: '2026-08-02T15:06:00+07:00', ownerId: 'u-002', kind: 'Документ', indexedText: 'Сценарий звонка: идентификация клиента, цель обращения, фиксация договоренности, следующий шаг, согласование канала ответа.' }
+    ]
+  },
+  {
+    id: 'WIKI-108',
+    space: 'Технический контур',
+    title: 'Правила повторного обмена с Email Gateway',
+    path: 'Технический контур / Email Gateway / Повтор отправки',
+    content: wikiArticleTexts.exchangeRetry,
+    updatedAt: '2026-07-28T09:45:00+07:00',
+    authorId: 'u-008',
+    status: 'Опубликована',
+    tags: ['технический контур', 'Email Gateway', 'обмен', 'администратор'],
+    versions: [
+      { id: 'WIKI-108-v2', label: 'v2 от 28.07.2026', at: '2026-07-28T09:45:00+07:00', authorId: 'u-008', content: 'Добавлен порядок повторного обмена и фиксации результата в журнале.', changeSummary: 'Уточнен технический сценарий.' },
+      { id: 'WIKI-108-v1', label: 'v1 от 12.05.2026', at: '2026-05-12T14:20:00+07:00', authorId: 'u-008', content: 'Коды ошибок Email Gateway и правила диагностики.', changeSummary: 'Первичная версия.' }
+    ],
+    attachments: [
+      { id: 'WATT-111', name: 'email-error-codes.csv', format: 'CSV', size: '22 КБ', uploadedAt: '2026-07-28T09:50:00+07:00', ownerId: 'u-008', kind: 'Таблица', indexedText: 'Коды ошибок Email Gateway: timeout, validation failed, duplicate object, access denied, повтор обмена, диагностика логов.' }
+    ]
+  },
+  {
+    id: 'WIKI-109',
+    space: 'Шаблоны коммуникаций',
+    parentId: 'WIKI-107',
+    title: 'Встречи, звонки и follow-up задачи',
+    path: 'Шаблоны коммуникаций / Ответы клиентам и контрагентам / Встречи, звонки и follow-up задачи',
+    content: wikiArticleTexts.communicationProcess,
+    updatedAt: '2026-08-05T11:30:00+07:00',
+    authorId: 'u-001',
+    status: 'Опубликована',
+    tags: ['коммуникации', 'follow-up', 'звонок', 'встреча'],
+    versions: [
+      { id: 'WIKI-109-v1', label: 'v1 от 05.08.2026', at: '2026-08-05T11:30:00+07:00', authorId: 'u-001', content: wikiArticleTexts.communicationProcess, changeSummary: 'Добавлена инструкция по планированию контактов и созданию follow-up задач.' }
+    ],
+    attachments: [
+      { id: 'WATT-112', name: 'communication-result-template.docx', format: 'DOCX', size: '58 КБ', uploadedAt: '2026-08-05T11:34:00+07:00', ownerId: 'u-001', kind: 'Документ', indexedText: 'Шаблон итога коммуникации: тема, участники, результат, следующий шаг, ответственный, срок follow-up, ссылка на процесс.' },
+      { id: 'WATT-113', name: 'call-follow-up-checklist.xlsx', format: 'XLSX', size: '36 КБ', uploadedAt: '2026-08-05T11:36:00+07:00', ownerId: 'u-003', kind: 'Таблица', indexedText: 'Контроль follow-up: запланирован контакт, зафиксирован итог, создана задача, назначен ответственный, указан срок.' }
+    ]
+  },
+  {
+    id: 'WIKI-110',
+    space: 'CRM+BPM',
+    parentId: 'WIKI-101',
+    title: 'Внутренние поручения подразделениям',
+    path: 'CRM+BPM / Процессы CRM и BPM / Внутренние поручения подразделениям',
+    content: wikiArticleTexts.handoffs,
+    updatedAt: '2026-08-05T14:00:00+07:00',
+    authorId: 'u-006',
+    status: 'Опубликована',
+    tags: ['поручения', 'подразделения', 'задачи', 'SLA'],
+    versions: [
+      { id: 'WIKI-110-v1', label: 'v1 от 05.08.2026', at: '2026-08-05T14:00:00+07:00', authorId: 'u-006', content: wikiArticleTexts.handoffs, changeSummary: 'Описан порядок создания и закрытия внутренних поручений.' }
+    ],
+    attachments: [
+      { id: 'WATT-114', name: 'internal-handoff-registry-rules.pdf', format: 'PDF', size: '104 КБ', uploadedAt: '2026-08-05T14:08:00+07:00', ownerId: 'u-006', kind: 'Документ', indexedText: 'Регламент поручений подразделениям: инициатор, адресат, связанная задача, срок, статус Ожидает, В работе, На проверке, Закрыто.' }
+    ]
+  },
+  {
+    id: 'WIKI-111',
+    space: 'CRM+BPM',
+    parentId: 'WIKI-101',
+    title: 'Договорные условия обслуживания ЮЛ',
+    path: 'CRM+BPM / Процессы CRM и BPM / Договорные условия обслуживания ЮЛ',
+    content: wikiArticleTexts.contract,
+    updatedAt: '2026-08-05T16:20:00+07:00',
+    authorId: 'u-006',
+    status: 'Опубликована',
+    tags: ['договор', 'ЮЛ', 'СЭД', 'сервисы'],
+    versions: [
+      { id: 'WIKI-111-v1', label: 'v1 от 05.08.2026', at: '2026-08-05T16:20:00+07:00', authorId: 'u-006', content: wikiArticleTexts.contract, changeSummary: 'Добавлен договорный процесс с границей CRM и СЭД.' }
+    ],
+    attachments: [
+      { id: 'WATT-115', name: 'contract-service-conditions-checklist.xlsx', format: 'XLSX', size: '42 КБ', uploadedAt: '2026-08-05T16:24:00+07:00', ownerId: 'u-005', kind: 'Таблица', indexedText: 'Чек-лист договорных условий: реквизиты, сервисы, подписант, тарифный пакет, SLA, статус СЭД, номер договора, контрольная дата.' },
+      { id: 'WATT-116', name: 'crm-sed-contract-boundary.pdf', format: 'PDF', size: '96 КБ', uploadedAt: '2026-08-05T16:26:00+07:00', ownerId: 'u-008', kind: 'Документ', indexedText: 'Граница CRM и СЭД: CRM контролирует процесс, задачи, статус и параметры сервиса; СЭД хранит текст договора и юридически значимое подписание.' }
+    ]
+  }
+];
+
+const auditLogs: AuditLog[] = [
+  {
+    id: 'LOG-0001',
+    userIdMasked: 'USR-1842',
+    at: '2026-08-04T09:00:00+07:00',
+    action: 'Ручной запуск процесса',
+    objectType: 'Процесс',
+    objectName: 'BP-2026-0160',
+    objectLink: 'BP-2026-0160',
+    logType: 'Действие пользователя',
+    result: 'Успешно'
+  },
+  {
+    id: 'LOG-0002',
+    userIdMasked: 'USR-8007',
+    at: '2026-08-03T16:39:03+07:00',
+    action: 'Импорт контактов',
+    objectType: 'Импорт',
+    objectName: 'ПР-000077',
+    objectLink: 'ПР-000077',
+    logType: 'Межсистемное взаимодействие',
+    result: 'Ошибка'
+  },
+  {
+    id: 'LOG-0003',
+    userIdMasked: 'USR-6019',
+    at: '2026-08-04T08:10:00+07:00',
+    action: 'Эскалация просроченной задачи',
+    objectType: 'Задача',
+    objectName: 'TASK-2050',
+    objectLink: 'TASK-2050',
+    logType: 'Системное событие',
+    result: 'Предупреждение'
+  },
+  {
+    id: 'LOG-0004',
+    userIdMasked: 'USR-4094',
+    at: '2026-08-04T10:05:00+07:00',
+    action: 'Изменение статуса задачи',
+    objectType: 'Задача',
+    objectName: 'TASK-2042',
+    objectLink: 'TASK-2042',
+    logType: 'Действие пользователя',
+    result: 'Успешно'
+  },
+  {
+    id: 'LOG-0005',
+    userIdMasked: 'USR-8007',
+    at: '2026-07-31T15:30:00+07:00',
+    action: 'Публикация версии процесса',
+    objectType: 'Шаблон БП',
+    objectName: 'Подключение контрагента к сервису СБП v4',
+    objectLink: 'pt-connect-sbp',
+    logType: 'Действие администратора',
+    result: 'Успешно'
+  }
+];
+
+export const defaultData: AppData = {
+  users,
+  counterparties: [...counterparties, ...additionalCounterparties],
+  taskTemplates,
+  tasks: [...tasks, ...additionalTasks],
+  processTemplates,
+  processes,
+  documents,
+  communications,
+  internalHandoffs,
+  notifications,
+  integrations,
+  dictionaries,
+  wiki,
+  auditLogs,
+  savedFilters: [
+    {
+      id: 'sf-1',
+      ownerRole: 'curator',
+      name: 'Контрагенты с риском',
+      target: 'counterparties',
+      query: '{"riskLimit":50,"sort":"risk","partyKind":"Все","type":"Все","status":"Все","logic":"AND"}'
+    },
+    {
+      id: 'sf-2',
+      ownerRole: 'owner',
+      name: 'Процессы с риском сроков',
+      target: 'processes',
+      query: 'status=Риск сроков OR overdueTasks>0'
+    }
+  ]
+};
+
+export const cloneDefaultData = (): AppData => JSON.parse(JSON.stringify(defaultData)) as AppData;
