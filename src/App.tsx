@@ -88,7 +88,11 @@ import type {
   InternalHandoffStatus,
   IntegrationExchange,
   Priority,
+  ProcessStage,
   ProcessTemplate,
+  ProcessTemplateSnapshot,
+  ProcessTemplateVersion,
+  ProcessTransition,
   ProcessInstance,
   ProcessStatus,
   RoleKey,
@@ -323,7 +327,7 @@ const roleNav: Record<RoleKey, { page: Page; label: string; icon: LucideIcon }[]
   ]
 };
 
-const cloneState = (data: AppData): AppData => JSON.parse(JSON.stringify(data)) as AppData;
+const cloneState = <T,>(data: T): T => JSON.parse(JSON.stringify(data)) as T;
 
 const normalize = (value: string) => value.toLowerCase().trim();
 const formatHoursInput = (value: number) => {
@@ -365,6 +369,18 @@ const canStartProcessForCounterparty = (template: ProcessTemplate, counterparty?
   if (!counterparty) return true;
   const kind: ProcessPartyKind = isIndividualCounterparty(counterparty) ? 'ФЛ' : 'ЮЛ';
   return getProcessTemplatePartyKinds(template).includes(kind);
+};
+const getNextStageByTemplate = (template: ProcessTemplate, stageIndex: number) => {
+  const currentStage = template.stages[stageIndex];
+  if (!currentStage) return { stage: undefined, index: -1, transition: undefined as ProcessTransition | undefined };
+  if (Array.isArray(template.transitions)) {
+    const explicitTransition = template.transitions.find((transition) => transition.fromStageId === currentStage.id && transition.createsTask);
+    const explicitIndex = explicitTransition ? template.stages.findIndex((stage) => stage.id === explicitTransition.toStageId) : -1;
+    if (explicitTransition && explicitIndex >= 0) return { stage: template.stages[explicitIndex], index: explicitIndex, transition: explicitTransition };
+    return { stage: undefined, index: -1, transition: undefined as ProcessTransition | undefined };
+  }
+  const fallbackIndex = stageIndex + 1;
+  return { stage: template.stages[fallbackIndex], index: fallbackIndex, transition: undefined as ProcessTransition | undefined };
 };
 const rowsCountByKind = (items: Counterparty[], kind: 'ФЛ' | 'ЮЛ') =>
   items.filter((item) => (kind === 'ФЛ' ? isIndividualCounterparty(item) : !isIndividualCounterparty(item))).length;
@@ -902,7 +918,8 @@ function App() {
   if (!process || !template || ['Завершен', 'Остановлен'].includes(process.status)) return;
   const counterparty = getCounterparty(data, process.counterpartyId);
   const currentStage = template.stages[process.stageIndex];
-    const nextStage = template.stages[process.stageIndex + 1];
+    const nextRoute = getNextStageByTemplate(template, process.stageIndex);
+    const nextStage = nextRoute.stage;
     const currentTaskIds = process.taskIds.filter((taskId) => {
       const task = getTask(data, taskId);
       return task?.templateId === currentStage?.autoTaskTemplateId && task.status !== 'Выполнена';
@@ -934,7 +951,7 @@ function App() {
 
       if (nextStage) {
         const nextTemplate = draft.taskTemplates.find((taskTemplate) => taskTemplate.id === nextStage.autoTaskTemplateId);
-        draftProcess.stageIndex += 1;
+        draftProcess.stageIndex = nextRoute.index;
         draftProcess.status = 'В работе';
         draftProcess.currentGroup = nextStage.department;
         draftProcess.elapsedHours += currentStage?.slaHours ?? 4;
@@ -943,7 +960,7 @@ function App() {
           at: '2026-08-04T12:15:00+07:00',
           actorId: currentUser.id,
           action: 'Переход этапа',
-          details: `Завершен этап "${currentStage?.name}", создана задача "${nextTemplate?.name}"`,
+          details: `Завершен этап "${currentStage?.name}", переход "${nextRoute.transition?.actionLabel ?? 'Следующий этап'}", создана задача "${nextTemplate?.name}"`,
           status: 'В работе'
         });
         draft.tasks.unshift({
@@ -967,7 +984,7 @@ function App() {
               at: '2026-08-04T12:15:00+07:00',
               actorId: currentUser.id,
               action: 'Создана автоматически',
-              details: `Маршрут процесса: ${currentStage?.name} -> ${nextStage.name}`,
+              details: `Маршрут процесса: ${currentStage?.name} -> ${nextStage.name}; условие: ${nextRoute.transition?.condition ?? 'последовательный переход'}`,
               status: 'Новая'
             }
           ]
@@ -4783,6 +4800,14 @@ function ReportsPage({
     rows: number;
     author: string;
   }
+  interface ReportViewerState {
+    report: ReportDefinition;
+    rows: ReportRow[];
+    generatedAt: string;
+    period: ReportPeriod;
+    format: ReportFormat;
+    riskLimit: number;
+  }
 
   const [period, setPeriod] = useState<ReportPeriod>('месяц');
   const [format, setFormat] = useState<ReportFormat>('CSV');
@@ -4791,6 +4816,7 @@ function ReportsPage({
   const [category, setCategory] = useState<ReportCategory | 'Все'>('Все');
   const [statusFilter, setStatusFilter] = useState<ReportStatusFilter>('Все');
   const [selectedReportId, setSelectedReportId] = useState('RPT-CRM-001');
+  const [reportViewer, setReportViewer] = useState<ReportViewerState | null>(null);
 
   const reportCatalog: ReportDefinition[] = [
     {
@@ -5147,10 +5173,14 @@ function ReportsPage({
       addAudit(draft, 'Формирование отчета', 'Отчет', report.name);
     });
     notify(`Отчет "${report.name}" сформирован: ${rows.length} строк`, 'success');
+    return generatedAt;
   };
 
   const generateReport = (report: ReportDefinition) => {
-    markReportGenerated(report, buildReportRows(report.id));
+    const rows = buildReportRows(report.id);
+    const generatedAt = markReportGenerated(report, rows);
+    setSelectedReportId(report.id);
+    setReportViewer({ report, rows, generatedAt, period, format, riskLimit });
   };
 
   const downloadReport = (report: ReportDefinition) => {
@@ -5190,6 +5220,72 @@ function ReportsPage({
     setRiskLimit(60);
     notify('Фильтры отчетов сброшены', 'info');
   };
+
+  const reportColumnLabels: Record<string, string> = {
+    id: 'ID',
+    client: 'Клиент',
+    kind: 'Вид',
+    type: 'Тип',
+    status: 'Статус',
+    segment: 'Сегмент',
+    region: 'Регион',
+    curator: 'Куратор',
+    risk: 'Риск',
+    activeProcesses: 'Активные процессы',
+    title: 'Название',
+    counterparty: 'Контрагент',
+    currentGroup: 'Текущая группа',
+    dueDate: 'Срок',
+    progress: 'Прогресс',
+    tasks: 'Задачи',
+    priority: 'Приоритет',
+    assignee: 'Исполнитель',
+    timeSpentHours: 'Факт часов',
+    group: 'Группа',
+    daysOverdue: 'Дней просрочки',
+    lastAction: 'Последнее действие',
+    penalties: 'Штрафы',
+    incidents: 'Инциденты',
+    nextControl: 'Контрольная дата',
+    system: 'Система',
+    operation: 'Операция',
+    object: 'Объект',
+    lastSync: 'Дата обмена',
+    errors: 'Ошибка',
+    records: 'Записей',
+    name: 'Наименование',
+    purpose: 'Назначение',
+    service: 'Сервис',
+    contractNumber: 'Договор',
+    format: 'Формат',
+    linkedObject: 'Связанный объект',
+    linkedObjectId: 'ID связи',
+    relatedTask: 'Связанная задача',
+    nextAction: 'Следующее действие',
+    owner: 'Владелец',
+    createdAt: 'Дата создания',
+    validUntil: 'Действует до',
+    responsible: 'Ответственный',
+    at: 'Дата/время',
+    department: 'Подразделение',
+    activeTasks: 'Активные задачи',
+    overdue: 'Просрочки',
+    nearestSla: 'Ближайший SLA',
+    version: 'Версия',
+    trigger: 'Триггер',
+    partyKinds: 'Тип клиента',
+    entityTypes: 'Объекты',
+    stages: 'Этапы',
+    rules: 'Правила',
+    notifications: 'Уведомления',
+    deliveryErrors: 'Ошибки доставки',
+    user: 'Пользователь',
+    action: 'Действие',
+    result: 'Результат'
+  };
+
+  const reportColumns = (rows: ReportRow[]) => Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const reportCell = (value: string | number | undefined) => (value === undefined || value === '' ? '—' : String(value));
 
   return (
     <div className="page-grid reports-page">
@@ -5392,6 +5488,86 @@ function ReportsPage({
           )}
         </aside>
       </div>
+
+      {reportViewer ? (
+        <Modal title={`Сформированный отчет ${reportViewer.report.id}`} onClose={() => setReportViewer(null)} width="large">
+          <div className="modal-body report-result-modal">
+            <div className="report-result-header">
+              <div>
+                <span className="caption">{reportViewer.report.category}</span>
+                <h2>{reportViewer.report.name}</h2>
+                <p>{reportViewer.report.purpose}</p>
+              </div>
+              <Badge tone="green">Готов</Badge>
+            </div>
+
+            <div className="report-result-summary">
+              <div className="info">
+                <span>Сформирован</span>
+                <strong>{formatDateTime(reportViewer.generatedAt)}</strong>
+              </div>
+              <div className="info">
+                <span>Период</span>
+                <strong>{reportViewer.period}</strong>
+              </div>
+              <div className="info">
+                <span>Формат файла</span>
+                <strong>{reportViewer.format}</strong>
+              </div>
+              <div className="info">
+                <span>Строк</span>
+                <strong>{formatNumber(reportViewer.rows.length)}</strong>
+              </div>
+              <div className="info">
+                <span>Порог риска</span>
+                <strong>{reportViewer.riskLimit}</strong>
+              </div>
+              <div className="info">
+                <span>Ответственный</span>
+                <strong>{roleLabel}</strong>
+              </div>
+            </div>
+
+            {reportViewer.rows.length ? (
+              <div className="report-result-table-wrap">
+                <table className="report-result-table">
+                  <thead>
+                    <tr>
+                      {reportColumns(reportViewer.rows).map((column) => (
+                        <th key={column}>{reportColumnLabels[column] ?? column}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportViewer.rows.map((row, rowIndex) => (
+                      <tr key={`${reportViewer.report.id}-generated-${rowIndex}`}>
+                        {reportColumns(reportViewer.rows).map((column) => (
+                          <td key={column}>{reportCell(row[column])}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="report-result-empty">
+                <Table2 size={20} />
+                <strong>По выбранным параметрам строк нет</strong>
+                <span>Измените фильтры отчета или период и сформируйте отчет повторно.</span>
+              </div>
+            )}
+
+            <footer className="modal-actions report-result-actions">
+              <Button icon={RefreshCw} onClick={() => generateReport(reportViewer.report)}>
+                Переформировать
+              </Button>
+              <Button icon={FileDown} variant="primary" onClick={() => downloadReport(reportViewer.report)}>
+                Выгрузить файл
+              </Button>
+            </footer>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }
@@ -5411,138 +5587,969 @@ function DesignerPage({
 }) {
   const [selected, setSelected] = useState(data.processTemplates[0]?.id ?? '');
   const template = data.processTemplates.find((item) => item.id === selected) ?? data.processTemplates[0];
+  const [selectedStageId, setSelectedStageId] = useState(template?.stages[0]?.id ?? '');
+  const [newTemplateName, setNewTemplateName] = useState('Новый операционный процесс');
+  const [newTemplateKind, setNewTemplateKind] = useState<ProcessPartyKind>('ЮЛ');
+  const [newEntityType, setNewEntityType] = useState('Заявка');
+  const [newStatus, setNewStatus] = useState<ProcessStatus>('Ожидание контрагента');
+  const [rollbackVersion, setRollbackVersion] = useState(1);
+  const [lastCheck, setLastCheck] = useState<{ status: 'ok' | 'warning'; messages: string[] } | null>(null);
+  const [insertAfterStageId, setInsertAfterStageId] = useState('end');
+  const defaultTaskTemplateId = data.taskTemplates[0]?.id ?? '';
+  const [stageDraft, setStageDraft] = useState({
+    name: 'Новый этап процесса',
+    department: 'Операционный контроль',
+    slaHours: 8,
+    autoTaskTemplateId: defaultTaskTemplateId,
+    requiredAttributes: 'Результат проверки, Комментарий исполнителя',
+    formFields: 'Контрагент, Основание, Итоговое решение',
+    escalationRule: 'при просрочке уведомить руководителя процесса',
+    errorHandler: 'создать задачу администратору BPM и зафиксировать ошибку в журнале'
+  });
+  const [transitionDraft, setTransitionDraft] = useState({
+    fromStageId: template?.stages[0]?.id ?? '',
+    toStageId: template?.stages[1]?.id ?? template?.stages[0]?.id ?? '',
+    condition: 'Все обязательные результаты этапа заполнены',
+    actionLabel: 'Передать на следующий этап',
+    role: 'Любая роль' as ProcessTransition['role'],
+    createsTask: true
+  });
+  const [fieldDraft, setFieldDraft] = useState<DictionaryField>({
+    id: 'attr-new',
+    name: 'Новый атрибут формы',
+    type: 'Строка',
+    required: true,
+    source: '',
+    formula: ''
+  });
+  const [ruleDraft, setRuleDraft] = useState({
+    kind: 'validation' as 'validation' | 'business' | 'escalation' | 'integration' | 'error',
+    text: 'Если обязательное поле не заполнено, запретить переход этапа'
+  });
   const canAdmin = role === 'admin';
+  const currentAdmin = roles.find((item) => item.key === role);
 
-  const publish = () => {
+  useEffect(() => {
+    if (!template) return;
+    if (!template.stages.some((stage) => stage.id === selectedStageId)) {
+      setSelectedStageId(template.stages[0]?.id ?? '');
+    }
+    const firstStageId = template.stages[0]?.id ?? '';
+    const secondStageId = template.stages[1]?.id ?? firstStageId;
+    if (
+      !template.stages.some((stage) => stage.id === transitionDraft.fromStageId) ||
+      !template.stages.some((stage) => stage.id === transitionDraft.toStageId)
+    ) {
+      setTransitionDraft((previous) => ({ ...previous, fromStageId: firstStageId, toStageId: secondStageId }));
+    }
+    if (!['start', 'end'].includes(insertAfterStageId) && !template.stages.some((stage) => stage.id === insertAfterStageId)) {
+      setInsertAfterStageId('end');
+    }
+  }, [template?.id, template?.stages.length, selectedStageId, transitionDraft.fromStageId, transitionDraft.toStageId, insertAfterStageId]);
+
+  const triggerOptions: ProcessTemplate['trigger'][] = ['Ручной запуск', 'Событие ИС', 'Таймер', 'API'];
+  const fieldTypeOptions: DictionaryField['type'][] = ['Строка', 'Число', 'Дата', 'Время', 'Справочник', 'Множественный выбор', 'Формула', 'Да/Нет'];
+  const statusOptions: ProcessStatus[] = ['Черновик', 'Запущен', 'В работе', 'Ожидание контрагента', 'Риск сроков', 'Ошибка интеграции', 'Завершен', 'Остановлен'];
+  const transitionRoleOptions: ProcessTransition['role'][] = ['Любая роль', 'curator', 'department', 'owner', 'admin'];
+  const roleLabel = (key: ProcessTransition['role']) => (key === 'Любая роль' ? key : roles.find((item) => item.key === key)?.label ?? key);
+  const splitList = (value: string) =>
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  const selectedStage = template?.stages.find((stage) => stage.id === selectedStageId) ?? template?.stages[0];
+  const statusModel = template?.statusModel?.length ? template.statusModel : statusOptions;
+  const insertPositionOptions = template ? ['end', 'start', ...template.stages.map((stage) => stage.id)] : ['end', 'start'];
+  const insertPositionLabel = (value: string) => {
+    if (value === 'end') return 'В конец маршрута';
+    if (value === 'start') return 'В начало маршрута';
+    return `После: ${template?.stages.find((stage) => stage.id === value)?.name ?? value}`;
+  };
+  const transitionId = () => `tr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const makeSequentialTransition = (fromStageId: string, toStageId: string): ProcessTransition => ({
+    id: transitionId(),
+    fromStageId,
+    toStageId,
+    condition: 'Все обязательные результаты предыдущего этапа заполнены',
+    actionLabel: 'Передать дальше',
+    createsTask: true,
+    role: 'Любая роль'
+  });
+  const isLinearRoute = (stages: ProcessStage[], transitions: ProcessTransition[]) =>
+    transitions.length === Math.max(0, stages.length - 1) &&
+    stages.slice(0, -1).every((stage, index) =>
+      transitions.some((transition) => transition.fromStageId === stage.id && transition.toStageId === stages[index + 1].id && transition.createsTask)
+    );
+  const sequentialTransitionsFor = (item: ProcessTemplate): ProcessTransition[] =>
+    item.stages.slice(0, -1).map((stage, index) => ({
+      id: `auto-${stage.id}-${item.stages[index + 1].id}`,
+      fromStageId: stage.id,
+      toStageId: item.stages[index + 1].id,
+      condition: 'Все обязательные результаты этапа заполнены',
+      actionLabel: 'Следующий этап',
+      createsTask: true,
+      role: 'Любая роль'
+    }));
+  const hasExplicitTransitions = (item?: ProcessTemplate): item is ProcessTemplate & { transitions: ProcessTransition[] } => Array.isArray(item?.transitions);
+  const visibleTransitions: ProcessTransition[] =
+    template
+      ? hasExplicitTransitions(template)
+        ? template.transitions
+        : sequentialTransitionsFor(template)
+      : [];
+  const buildTemplateSnapshot = (item: ProcessTemplate): ProcessTemplateSnapshot => ({
+    name: item.name,
+    processType: item.processType,
+    partyKinds: item.partyKinds ? [...item.partyKinds] : undefined,
+    trigger: item.trigger,
+    entityTypes: [...item.entityTypes],
+    attributes: cloneState(item.attributes),
+    stages: cloneState(item.stages),
+    statusModel: item.statusModel ? [...item.statusModel] : statusOptions,
+    transitions: hasExplicitTransitions(item) ? cloneState(item.transitions) : sequentialTransitionsFor(item),
+    validationRules: [...item.validationRules],
+    businessRules: item.businessRules ? [...item.businessRules] : [],
+    escalationRules: item.escalationRules ? [...item.escalationRules] : [],
+    integrationRules: [...item.integrationRules],
+    errorHandlingRules: item.errorHandlingRules ? [...item.errorHandlingRules] : []
+  });
+  const ensureCurrentVersionSnapshot = (item: ProcessTemplate) => {
+    if ((item.versionHistory ?? []).some((entry) => entry.version === item.version && entry.snapshot)) return;
+    item.versionHistory = [
+      {
+        version: item.version,
+        status: item.status,
+        changedAt: new Date().toISOString(),
+        authorId: currentAdmin?.userId ?? 'u-008',
+        changeSummary: 'Сохранена конфигурация опубликованной версии перед редактированием',
+        stagesCount: item.stages.length,
+        snapshot: buildTemplateSnapshot(item)
+      },
+      ...(item.versionHistory ?? [])
+    ];
+  };
+  const restoreTemplateSnapshot = (item: ProcessTemplate, snapshot: ProcessTemplateSnapshot) => {
+    item.name = snapshot.name;
+    item.processType = snapshot.processType;
+    item.partyKinds = snapshot.partyKinds ? [...snapshot.partyKinds] : undefined;
+    item.trigger = snapshot.trigger;
+    item.entityTypes = [...snapshot.entityTypes];
+    item.attributes = cloneState(snapshot.attributes);
+    item.stages = cloneState(snapshot.stages);
+    item.statusModel = snapshot.statusModel ? [...snapshot.statusModel] : undefined;
+    item.transitions = snapshot.transitions ? cloneState(snapshot.transitions) : undefined;
+    item.validationRules = [...snapshot.validationRules];
+    item.businessRules = snapshot.businessRules ? [...snapshot.businessRules] : undefined;
+    item.escalationRules = snapshot.escalationRules ? [...snapshot.escalationRules] : undefined;
+    item.integrationRules = [...snapshot.integrationRules];
+    item.errorHandlingRules = snapshot.errorHandlingRules ? [...snapshot.errorHandlingRules] : undefined;
+  };
+  const versionHistory: ProcessTemplateVersion[] = template
+    ? template.versionHistory?.length
+      ? template.versionHistory
+      : [
+          {
+            version: template.version,
+            status: template.status,
+            changedAt: '2026-08-04T09:00:00+07:00',
+            authorId: currentAdmin?.userId ?? 'u-008',
+            changeSummary: 'Текущая версия из демонстрационного набора',
+            stagesCount: template.stages.length
+          }
+        ]
+    : [];
+
+  const touchTemplate = (
+    updater: (item: ProcessTemplate, draft: AppData) => void,
+    auditAction?: string,
+    message?: string,
+    tone: ToastTone = 'success',
+    markDraft = true
+  ) => {
+    if (!template || !canAdmin) return;
     mutate((draft) => {
       const item = draft.processTemplates.find((processTemplate) => processTemplate.id === template.id);
       if (!item) return;
-      item.version += 1;
-      item.status = 'Актуальная';
-      addAudit(draft, 'Повышение версии бизнес-процесса', 'Шаблон БП', `${item.name} v${item.version}`, 'Успешно', 'Действие администратора');
+      if (markDraft && item.status === 'Актуальная') ensureCurrentVersionSnapshot(item);
+      updater(item, draft);
+      if (markDraft && item.status === 'Актуальная') item.status = 'Черновик';
+      if (auditAction) addAudit(draft, auditAction, 'Шаблон БП', item.name, 'Успешно', 'Действие администратора');
     });
-    notify('Версия процесса повышена и опубликована', 'success');
+    if (message) notify(message, tone);
+  };
+
+  const createTemplate = () => {
+    if (!canAdmin) return;
+    if (!newTemplateName.trim()) {
+      notify('Укажите название нового шаблона процесса', 'warning');
+      return;
+    }
+    const id = `pt-custom-${Date.now()}`;
+    const initialStageId = `${id}-stage-1`;
+    const taskTemplate = data.taskTemplates.find((item) => item.id === defaultTaskTemplateId) ?? data.taskTemplates[0];
+    mutate((draft) => {
+      const createdTemplate: ProcessTemplate = {
+        id,
+        name: newTemplateName.trim(),
+        processType: 'Настраиваемый процесс',
+        partyKinds: [newTemplateKind],
+        version: 1,
+        status: 'Черновик',
+        trigger: 'Ручной запуск',
+        entityTypes: [newTemplateKind === 'ЮЛ' ? 'Юридическое лицо' : 'Физическое лицо', 'Контрагент', newEntityType.trim() || 'Заявка', 'Задача'],
+        attributes: [
+          { id: `${id}-attr-1`, name: 'Основание запуска', type: 'Строка', required: true },
+          { id: `${id}-attr-2`, name: 'Контрольный срок', type: 'Дата', required: true }
+        ],
+        stages: [
+          {
+            id: initialStageId,
+            name: 'Первичная проверка',
+            department: taskTemplate?.assigneeGroup ?? 'Операционный контроль',
+            slaHours: taskTemplate?.slaHours ?? 8,
+            autoTaskTemplateId: taskTemplate?.id ?? defaultTaskTemplateId,
+            requiredAttributes: taskTemplate?.requiredFields ?? ['Результат проверки'],
+            formFields: ['Основание', 'Контрагент', 'Комментарий'],
+            escalationRule: 'уведомить руководителя процесса при просрочке',
+            errorHandler: 'создать инцидент администратору BPM'
+          }
+        ],
+        statusModel: ['Черновик', 'Запущен', 'В работе', 'Риск сроков', 'Завершен', 'Остановлен'],
+        transitions: [],
+        validationRules: ['Основание запуска обязательно до старта процесса'],
+        businessRules: ['Задача этапа создается только после выполнения предыдущего обязательного этапа'],
+        escalationRules: ['При просрочке SLA отправить уведомление руководителю процесса'],
+        integrationRules: ['Синхронно записать событие запуска в журнал CRM'],
+        errorHandlingRules: ['При ошибке автосоздания задачи остановить переход и создать инцидент администратору BPM'],
+        versionHistory: []
+      };
+      createdTemplate.versionHistory = [
+        {
+          version: 1,
+          status: 'Черновик',
+          changedAt: new Date().toISOString(),
+          authorId: currentAdmin?.userId ?? 'u-008',
+          changeSummary: 'Создан новый шаблон в конструкторе',
+          stagesCount: 1,
+          snapshot: buildTemplateSnapshot(createdTemplate)
+        }
+      ];
+      draft.processTemplates.unshift(createdTemplate);
+      addAudit(draft, 'Создание шаблона бизнес-процесса', 'Шаблон БП', newTemplateName.trim(), 'Успешно', 'Действие администратора');
+    });
+    setSelected(id);
+    setSelectedStageId(initialStageId);
+    notify('Шаблон создан как черновик. Его можно наполнить этапами, переходами и правилами', 'success');
+  };
+
+  const publish = () => {
+    if (!template) return;
+    const check = validateTemplate(template);
+    setLastCheck({ status: check.length ? 'warning' : 'ok', messages: check.length ? check : ['Автопроверка пройдена: маршрут, статусы, поля, переходы и интеграции заполнены'] });
+    if (check.length) {
+      notify('Нельзя опубликовать шаблон: автопроверка нашла ошибки настройки', 'warning');
+      return;
+    }
+    touchTemplate(
+      (item) => {
+        const nextVersion = item.version + 1;
+        item.version = nextVersion;
+        item.status = 'Актуальная';
+        item.versionHistory = [
+          {
+            version: nextVersion,
+            status: 'Актуальная',
+            changedAt: new Date().toISOString(),
+            authorId: currentAdmin?.userId ?? 'u-008',
+            changeSummary: 'Опубликована версия после проверки маршрута, форм и правил',
+            stagesCount: item.stages.length,
+            snapshot: buildTemplateSnapshot(item)
+          },
+          ...(item.versionHistory ?? [])
+        ];
+      },
+      'Повышение версии бизнес-процесса',
+      'Версия процесса повышена и опубликована',
+      'success',
+      false
+    );
   };
 
   const rollback = () => {
-    mutate((draft) => {
-      const item = draft.processTemplates.find((processTemplate) => processTemplate.id === template.id);
-      if (!item) return;
-      item.version = Math.max(1, item.version - 1);
-      addAudit(draft, 'Понижение версии бизнес-процесса', 'Шаблон БП', `${item.name} v${item.version}`, 'Предупреждение', 'Действие администратора');
-    });
-    notify('Версия процесса понижена до предыдущей', 'warning');
+    if (!template) return;
+    const targetVersion = Math.max(1, Math.min(rollbackVersion, template.version));
+    const targetEntry = template.versionHistory?.find((entry) => entry.version === targetVersion && entry.snapshot);
+    if (!targetEntry?.snapshot) {
+      notify(`Для версии v${targetVersion} нет сохраненной конфигурации маршрута`, 'warning');
+      return;
+    }
+    const targetSnapshot = targetEntry.snapshot;
+    touchTemplate(
+      (item) => {
+        restoreTemplateSnapshot(item, targetSnapshot);
+        item.version = targetVersion;
+        item.status = 'Черновик';
+        item.versionHistory = [
+          {
+            version: targetVersion,
+            status: 'Черновик',
+            changedAt: new Date().toISOString(),
+            authorId: currentAdmin?.userId ?? 'u-008',
+            changeSummary: 'Восстановлена выбранная версия как черновик для проверки',
+            stagesCount: item.stages.length,
+            snapshot: buildTemplateSnapshot(item)
+          },
+          ...(item.versionHistory ?? [])
+        ];
+      },
+      'Понижение версии бизнес-процесса',
+      `Версия процесса восстановлена до v${targetVersion} как черновик`,
+      'warning'
+    );
   };
 
-  const addRule = () => {
-    mutate((draft) => {
-      const item = draft.processTemplates.find((processTemplate) => processTemplate.id === template.id);
-      item?.validationRules.push('Новое правило: обязательная проверка ответственного подразделения');
-      if (item) addAudit(draft, 'Настройка правила валидации процесса', 'Шаблон БП', item.name, 'Успешно', 'Действие администратора');
+  function validateTemplate(item: ProcessTemplate) {
+    const errors: string[] = [];
+    const itemStatusModel = item.statusModel?.length ? item.statusModel : statusOptions;
+    if (!item.name.trim()) errors.push('Не указано название шаблона');
+    if (!item.entityTypes.length) errors.push('Не указаны связанные бизнес-сущности');
+    if (!item.attributes.some((attribute) => attribute.required)) errors.push('В форме должен быть хотя бы один обязательный атрибут');
+    if (!item.stages.length) errors.push('Маршрут должен содержать минимум один этап');
+    item.stages.forEach((stage, index) => {
+      if (!stage.name.trim()) errors.push(`Этап ${index + 1}: не указано название`);
+      if (!stage.department.trim()) errors.push(`Этап ${index + 1}: не указана группа исполнителей`);
+      if (!stage.autoTaskTemplateId) errors.push(`Этап ${index + 1}: не выбран шаблон задачи`);
+      if (!stage.requiredAttributes.length) errors.push(`Этап ${index + 1}: не заданы обязательные результаты`);
+      if (!Number.isFinite(stage.slaHours) || stage.slaHours <= 0) errors.push(`Этап ${index + 1}: SLA должен быть больше 0`);
     });
-    notify('Правило валидации добавлено в шаблон', 'success');
+    const transitions = hasExplicitTransitions(item) ? item.transitions : sequentialTransitionsFor(item);
+    if (item.stages.length > 1 && !transitions.length) errors.push('Для многоэтапного процесса должен быть задан хотя бы один переход');
+    transitions.forEach((transition) => {
+      if (!item.stages.some((stage) => stage.id === transition.fromStageId)) errors.push(`Переход ${transition.id}: исходный этап не найден`);
+      if (!item.stages.some((stage) => stage.id === transition.toStageId)) errors.push(`Переход ${transition.id}: целевой этап не найден`);
+      if (transition.fromStageId === transition.toStageId) errors.push(`Переход ${transition.id}: исходный и целевой этап совпадают`);
+      if (!transition.condition.trim()) errors.push(`Переход ${transition.id}: не указано условие`);
+    });
+    if (item.stages.length > 1) {
+      item.stages.slice(0, -1).forEach((stage) => {
+        if (!transitions.some((transition) => transition.fromStageId === stage.id)) errors.push(`Этап "${stage.name}": нет исходящего перехода`);
+      });
+      item.stages.slice(1).forEach((stage) => {
+        if (!transitions.some((transition) => transition.toStageId === stage.id)) errors.push(`Этап "${stage.name}": нет входящего перехода`);
+      });
+    }
+    if (!itemStatusModel.includes('Завершен')) errors.push('Статусная модель должна содержать статус "Завершен"');
+    if (!itemStatusModel.includes('Остановлен')) errors.push('Статусная модель должна содержать статус "Остановлен"');
+    if (!item.validationRules.length) errors.push('Не задано ни одного правила валидации данных');
+    if (!item.integrationRules.length) errors.push('Не задан синхронный интеграционный интерфейс или журналируемое событие');
+    if (!(item.errorHandlingRules ?? []).length) errors.push('Не задано правило обработки ошибок исполнения');
+    return errors;
   };
 
   const addStage = () => {
-    mutate((draft) => {
-      const item = draft.processTemplates.find((processTemplate) => processTemplate.id === template.id);
-      const taskTemplate = draft.taskTemplates[0];
-      item?.stages.push({
-        id: `s-extra-${item.stages.length + 1}`,
-        name: 'Контрольная проверка качества данных',
-        department: 'Операционный контроль',
-        slaHours: 8,
-        autoTaskTemplateId: taskTemplate.id,
-        requiredAttributes: ['Комментарий проверяющего', 'Итог проверки'],
-        escalationRule: 'уведомить владельца процесса при просрочке'
-      });
-      if (item) addAudit(draft, 'Добавление этапа в маршрут процесса', 'Шаблон БП', item.name, 'Успешно', 'Действие администратора');
-    });
-    notify('Новый этап добавлен в маршрут; будущие экземпляры будут создавать задачу автоматически', 'success');
+    if (!stageDraft.name.trim()) {
+      notify('Укажите название этапа', 'warning');
+      return;
+    }
+    const newId = `stage-${Date.now()}`;
+    touchTemplate(
+      (item) => {
+        const existingTransitions = hasExplicitTransitions(item) ? item.transitions : sequentialTransitionsFor(item);
+        const oldStages = [...item.stages];
+        const requestedIndex =
+          insertAfterStageId === 'start'
+            ? 0
+            : insertAfterStageId === 'end'
+              ? oldStages.length
+              : oldStages.findIndex((stage) => stage.id === insertAfterStageId) + 1;
+        const insertIndex = requestedIndex <= 0 ? 0 : Math.min(requestedIndex, oldStages.length);
+        const newStage: ProcessStage = {
+          id: newId,
+          name: stageDraft.name.trim(),
+          department: stageDraft.department.trim() || 'Операционный контроль',
+          slaHours: Number(stageDraft.slaHours) || 8,
+          autoTaskTemplateId: stageDraft.autoTaskTemplateId || defaultTaskTemplateId,
+          requiredAttributes: splitList(stageDraft.requiredAttributes),
+          formFields: splitList(stageDraft.formFields),
+          escalationRule: stageDraft.escalationRule.trim() || 'уведомить владельца процесса при просрочке',
+          errorHandler: stageDraft.errorHandler.trim() || 'создать инцидент администратору BPM'
+        };
+        item.stages.splice(insertIndex, 0, newStage);
+        const previous = item.stages[insertIndex - 1];
+        const next = item.stages[insertIndex + 1];
+        if (isLinearRoute(oldStages, existingTransitions)) {
+          item.transitions = sequentialTransitionsFor(item);
+          return;
+        }
+        const directTransition = previous && next
+          ? existingTransitions.find((transition) => transition.fromStageId === previous.id && transition.toStageId === next.id)
+          : undefined;
+        const nextTransitions = directTransition
+          ? existingTransitions.filter((transition) => !(transition.fromStageId === previous?.id && transition.toStageId === next?.id))
+          : [...existingTransitions];
+        if (previous) {
+          nextTransitions.push({
+            ...(directTransition ?? makeSequentialTransition(previous.id, newId)),
+            id: transitionId(),
+            fromStageId: previous.id,
+            toStageId: newId
+          });
+        }
+        if (next) {
+          nextTransitions.push({
+            ...(directTransition ?? makeSequentialTransition(newId, next.id)),
+            id: transitionId(),
+            fromStageId: newId,
+            toStageId: next.id
+          });
+        }
+        item.transitions = nextTransitions;
+      },
+      'Добавление этапа в маршрут процесса',
+      'Этап добавлен в выбранную позицию, переходы маршрута обновлены'
+    );
+    setSelectedStageId(newId);
+    setInsertAfterStageId(newId);
   };
 
+  const updateStage = (stageId: string, updater: (stage: ProcessStage) => void) => {
+    touchTemplate((item) => {
+      const stage = item.stages.find((candidate) => candidate.id === stageId);
+      if (stage) updater(stage);
+    });
+  };
+
+  const moveStage = (stageId: string, direction: -1 | 1) => {
+    touchTemplate(
+      (item) => {
+        const index = item.stages.findIndex((stage) => stage.id === stageId);
+        const target = index + direction;
+        if (index < 0 || target < 0 || target >= item.stages.length) return;
+        const existingTransitions = hasExplicitTransitions(item) ? item.transitions : sequentialTransitionsFor(item);
+        const wasLinearRoute = isLinearRoute(item.stages, existingTransitions);
+        const [stage] = item.stages.splice(index, 1);
+        item.stages.splice(target, 0, stage);
+        if (wasLinearRoute) item.transitions = sequentialTransitionsFor(item);
+      },
+      'Изменение порядка этапов процесса',
+      'Порядок этапов изменен. Линейный маршрут перестроен, нестандартные переходы сохранены'
+    );
+  };
+
+  const deleteStage = (stageId: string) => {
+    if (!template || template.stages.length <= 1) {
+      notify('В шаблоне должен остаться минимум один этап', 'warning');
+      return;
+    }
+    touchTemplate(
+      (item) => {
+        const existingTransitions = hasExplicitTransitions(item) ? item.transitions : sequentialTransitionsFor(item);
+        item.stages = item.stages.filter((stage) => stage.id !== stageId);
+        item.transitions = existingTransitions.filter((transition) => transition.fromStageId !== stageId && transition.toStageId !== stageId);
+      },
+      'Удаление этапа из маршрута процесса',
+      'Этап удален из черновика маршрута',
+      'warning'
+    );
+  };
+
+  const addTransition = () => {
+    if (transitionDraft.fromStageId === transitionDraft.toStageId) {
+      notify('Исходный и целевой этап перехода должны отличаться', 'warning');
+      return;
+    }
+    touchTemplate(
+      (item) => {
+        const existingTransitions = hasExplicitTransitions(item) ? item.transitions : sequentialTransitionsFor(item);
+        item.transitions = [
+          ...existingTransitions.filter(
+            (transition) => !(transition.fromStageId === transitionDraft.fromStageId && transition.toStageId === transitionDraft.toStageId)
+          ),
+          {
+            id: `tr-${Date.now()}`,
+            fromStageId: transitionDraft.fromStageId,
+            toStageId: transitionDraft.toStageId,
+            condition: transitionDraft.condition.trim() || 'Все обязательные результаты заполнены',
+            actionLabel: transitionDraft.actionLabel.trim() || 'Передать дальше',
+            role: transitionDraft.role,
+            createsTask: transitionDraft.createsTask
+          }
+        ];
+      },
+      'Настройка перехода бизнес-процесса',
+      'Переход добавлен в маршрут'
+    );
+  };
+
+  const deleteTransition = (transitionId: string) => {
+    touchTemplate(
+      (item) => {
+        const existingTransitions = hasExplicitTransitions(item) ? item.transitions : sequentialTransitionsFor(item);
+        item.transitions = existingTransitions.filter((transition) => transition.id !== transitionId);
+      },
+      'Удаление перехода бизнес-процесса',
+      'Переход удален из черновика маршрута',
+      'warning'
+    );
+  };
+
+  const addField = () => {
+    if (!fieldDraft.name.trim()) {
+      notify('Укажите название атрибута формы', 'warning');
+      return;
+    }
+    touchTemplate(
+      (item) => {
+        item.attributes.push({
+          ...fieldDraft,
+          id: `attr-${Date.now()}`,
+          name: fieldDraft.name.trim(),
+          source: fieldDraft.source?.trim() || undefined,
+          formula: fieldDraft.formula?.trim() || undefined
+        });
+      },
+      'Добавление атрибута формы процесса',
+      'Атрибут добавлен в пользовательскую форму'
+    );
+  };
+
+  const deleteField = (fieldId: string) => {
+    touchTemplate(
+      (item) => {
+        item.attributes = item.attributes.filter((field) => field.id !== fieldId);
+      },
+      'Удаление атрибута формы процесса',
+      'Атрибут удален из формы',
+      'warning'
+    );
+  };
+
+  const addStatus = () => {
+    touchTemplate(
+      (item) => {
+        item.statusModel = Array.from(new Set([...(item.statusModel ?? statusOptions), newStatus]));
+      },
+      'Настройка статусной модели процесса',
+      'Статус добавлен в модель процесса'
+    );
+  };
+
+  const deleteStatus = (status: ProcessStatus) => {
+    if (['Запущен', 'В работе', 'Завершен', 'Остановлен'].includes(status)) {
+      notify('Базовые статусы маршрута лучше не удалять: они используются исполнением процесса', 'warning');
+      return;
+    }
+    touchTemplate(
+      (item) => {
+        item.statusModel = (item.statusModel ?? statusOptions).filter((itemStatus) => itemStatus !== status);
+      },
+      'Настройка статусной модели процесса',
+      'Статус удален из черновика',
+      'warning'
+    );
+  };
+
+  const addEntityType = () => {
+    if (!newEntityType.trim()) return;
+    touchTemplate(
+      (item) => {
+        item.entityTypes = Array.from(new Set([...item.entityTypes, newEntityType.trim()]));
+      },
+      'Настройка связанных бизнес-сущностей процесса',
+      'Связанная бизнес-сущность добавлена'
+    );
+    setNewEntityType('');
+  };
+
+  const addRule = () => {
+    if (!ruleDraft.text.trim()) {
+      notify('Введите текст правила', 'warning');
+      return;
+    }
+    touchTemplate(
+      (item) => {
+        if (ruleDraft.kind === 'validation') item.validationRules.push(ruleDraft.text.trim());
+        if (ruleDraft.kind === 'business') item.businessRules = [...(item.businessRules ?? []), ruleDraft.text.trim()];
+        if (ruleDraft.kind === 'escalation') item.escalationRules = [...(item.escalationRules ?? []), ruleDraft.text.trim()];
+        if (ruleDraft.kind === 'integration') item.integrationRules.push(ruleDraft.text.trim());
+        if (ruleDraft.kind === 'error') item.errorHandlingRules = [...(item.errorHandlingRules ?? []), ruleDraft.text.trim()];
+      },
+      'Настройка правила исполнения процесса',
+      'Правило добавлено в шаблон'
+    );
+  };
+
+  const deleteRule = (kind: typeof ruleDraft.kind, rule: string) => {
+    touchTemplate(
+      (item) => {
+        if (kind === 'validation') item.validationRules = item.validationRules.filter((candidate) => candidate !== rule);
+        if (kind === 'business') item.businessRules = (item.businessRules ?? []).filter((candidate) => candidate !== rule);
+        if (kind === 'escalation') item.escalationRules = (item.escalationRules ?? []).filter((candidate) => candidate !== rule);
+        if (kind === 'integration') item.integrationRules = item.integrationRules.filter((candidate) => candidate !== rule);
+        if (kind === 'error') item.errorHandlingRules = (item.errorHandlingRules ?? []).filter((candidate) => candidate !== rule);
+      },
+      'Удаление правила исполнения процесса',
+      'Правило удалено из черновика',
+      'warning'
+    );
+  };
+
+  const runAutoCheck = () => {
+    if (!template) return;
+    const messages = validateTemplate(template);
+    setLastCheck({ status: messages.length ? 'warning' : 'ok', messages: messages.length ? messages : ['Автопроверка пройдена: исполняемый маршрут корректен'] });
+    notify(messages.length ? `Автопроверка нашла замечания: ${messages.length}` : 'Автопроверка: маршрут корректен', messages.length ? 'warning' : 'success');
+  };
+
+  if (!template) {
+    return <EmptyState title="Шаблоны процессов не найдены" text="Создайте первый шаблон бизнес-процесса под ролью Администратор BPM." />;
+  }
+
   return (
-    <div className="page-grid">
-      <section className="toolbar band">
+    <div className="page-grid designer-page">
+      <section className="toolbar band designer-hero">
         <div>
           <h1>Конструктор бизнес-процессов</h1>
-          <p>Визуализация low/no-code настройки: статусная модель, формы, правила, версии, проверки и интеграционные интерфейсы.</p>
+          <p>Настройка шаблонов CRM+BPM: связанные сущности, формы, этапы, переходы, задачи, правила, интеграции и версии.</p>
         </div>
         <div className="actions">
-          <Button icon={ShieldCheck} onClick={() => notify('Автопроверка: маршрут корректен, обязательные поля заполнены, интеграции описаны', 'success')}>
+          <Button icon={ShieldCheck} onClick={runAutoCheck}>
             Проверить БП
           </Button>
-          {canAdmin ? <Button icon={RotateCcw} onClick={rollback}>Откатить версию</Button> : null}
+          {canAdmin ? <Button icon={RotateCcw} onClick={rollback}>Вернуть версию</Button> : null}
           {canAdmin ? <Button icon={Save} variant="primary" onClick={publish}>Опубликовать</Button> : null}
         </div>
       </section>
 
-      <div className="content-layout two-columns wide-left">
-        <section className="panel">
+      <div className="designer-shell">
+        <aside className="panel designer-sidebar">
           <div className="panel-header">
             <div>
-              <h2>{template.name}</h2>
-              <p>Версия {template.version} · {template.status} · триггер: {template.trigger} · доступен: {getProcessTemplatePartyKinds(template).join('/')}</p>
+              <h2>Шаблоны</h2>
+              <p>{data.processTemplates.length} маршрутов CRM+BPM</p>
             </div>
-            <select value={selected} onChange={(event) => setSelected(event.target.value)}>
-              {data.processTemplates.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
           </div>
-          <div className="designer-canvas">
-            {template.stages.map((stage, index) => (
-              <article key={stage.id} className="designer-node">
-                <span>{index + 1}</span>
-                <h3>{stage.name}</h3>
-                <p>{stage.department}</p>
-                <small>SLA {stage.slaHours} ч</small>
-                <Badge tone="cyan">{data.taskTemplates.find((taskTemplate) => taskTemplate.id === stage.autoTaskTemplateId)?.name ?? 'Шаблон задачи'}</Badge>
-              </article>
+          <div className="designer-template-list">
+            {data.processTemplates.map((item) => (
+              <button key={item.id} className={item.id === template.id ? 'active' : ''} onClick={() => setSelected(item.id)}>
+                <strong>{item.name}</strong>
+                <span>v{item.version} · {item.status} · {getProcessTemplatePartyKinds(item).join('/')}</span>
+              </button>
             ))}
           </div>
           {canAdmin ? (
-            <div className="actions">
-              <Button icon={Plus} onClick={addStage}>
-                Добавить этап
-              </Button>
-              <Button icon={Plus} onClick={addRule}>
-                Добавить правило
+            <div className="designer-create-box">
+              <Field label="Новый шаблон" value={newTemplateName} onChange={setNewTemplateName} />
+              <SelectField label="Доступен для" value={newTemplateKind} options={['ЮЛ', 'ФЛ']} onChange={setNewTemplateKind} />
+              <Field label="Первичная сущность" value={newEntityType} onChange={setNewEntityType} />
+              <Button icon={Plus} variant="primary" onClick={createTemplate}>
+                Создать шаблон
               </Button>
             </div>
           ) : null}
-        </section>
+        </aside>
 
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Настройки шаблона</h2>
-          </div>
-          <div className="settings-list">
-            <section>
-              <h3>Атрибуты формы GUI</h3>
-              {template.attributes.map((attr) => (
-                <div key={attr.id} className="setting-row">
-                  <span>{attr.name}</span>
-                  <Badge tone={attr.required ? 'amber' : 'neutral'}>{attr.type}</Badge>
+        <main className="designer-workspace">
+          <section className="panel designer-config">
+            <div className="panel-header">
+              <div>
+                <h2>{template.name}</h2>
+                <p>Версия {template.version} · {template.status} · триггер: {template.trigger}</p>
+              </div>
+              <Badge tone={template.status === 'Актуальная' ? 'green' : template.status === 'Черновик' ? 'amber' : 'neutral'}>{template.status}</Badge>
+            </div>
+            <div className="designer-form-grid">
+              <Field label="Название шаблона" value={template.name} onChange={(value) => touchTemplate((item) => { item.name = value; })} />
+              <Field label="Тип процесса" value={template.processType ?? ''} onChange={(value) => touchTemplate((item) => { item.processType = value; })} />
+              <SelectField label="Триггер запуска" value={template.trigger} options={triggerOptions} onChange={(value) => touchTemplate((item) => { item.trigger = value; })} />
+              <Field label="Вернуть к версии" value={rollbackVersion} type="number" onChange={(value) => setRollbackVersion(Number(value) || 1)} />
+            </div>
+            <div className="designer-chip-section">
+              <span>Доступность процесса</span>
+              <div className="designer-chip-row">
+                {(['ЮЛ', 'ФЛ'] as ProcessPartyKind[]).map((kind) => (
+                  <button
+                    key={kind}
+                    className={getProcessTemplatePartyKinds(template).includes(kind) ? 'active' : ''}
+                    onClick={() =>
+                      touchTemplate((item) => {
+                        const current = getProcessTemplatePartyKinds(item);
+                        item.partyKinds = current.includes(kind) ? current.filter((candidate) => candidate !== kind) : [...current, kind];
+                        if (!item.partyKinds.length) item.partyKinds = [kind];
+                      })
+                    }
+                  >
+                    {kind}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="designer-chip-section">
+              <span>Связанные бизнес-сущности</span>
+              <div className="designer-chip-row">
+                {template.entityTypes.map((entity) => (
+                  <button key={entity} onClick={() => touchTemplate((item) => { item.entityTypes = item.entityTypes.filter((candidate) => candidate !== entity); })}>
+                    {entity}
+                    <X size={12} />
+                  </button>
+                ))}
+              </div>
+              <div className="designer-inline-add">
+                <Field label="Добавить сущность" value={newEntityType} onChange={setNewEntityType} />
+                <Button icon={Plus} onClick={addEntityType}>Добавить</Button>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel designer-route-panel">
+            <div className="panel-header">
+              <div>
+                <h2>Маршрут и этапы</h2>
+                <p>Этапы можно добавлять, редактировать, удалять и менять местами. Переходы ниже определяют следующий этап исполнения.</p>
+              </div>
+              <Badge tone="cyan">{template.stages.length} этапов</Badge>
+            </div>
+            <div className="designer-canvas designer-canvas-advanced">
+              {template.stages.map((stage, index) => (
+                <article key={stage.id} className={`designer-node ${stage.id === selectedStage?.id ? 'active' : ''}`}>
+                  <button className="designer-node-main" onClick={() => setSelectedStageId(stage.id)}>
+                    <span>{index + 1}</span>
+                    <h3>{stage.name}</h3>
+                    <p>{stage.department}</p>
+                    <small>SLA {stage.slaHours} ч · {stage.requiredAttributes.length} результатов</small>
+                    <Badge tone="cyan">{data.taskTemplates.find((taskTemplate) => taskTemplate.id === stage.autoTaskTemplateId)?.name ?? 'Шаблон задачи'}</Badge>
+                  </button>
+                  {canAdmin ? (
+                    <div className="designer-node-actions">
+                      <IconButton title="Сдвинуть влево" icon={ArrowDownUp} onClick={() => moveStage(stage.id, -1)} />
+                      <IconButton title="Сдвинуть вправо" icon={ArrowDownUp} onClick={() => moveStage(stage.id, 1)} />
+                      <IconButton title="Удалить этап" icon={Trash2} onClick={() => deleteStage(stage.id)} />
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+
+            {selectedStage ? (
+              <div className="designer-stage-editor">
+                <h3>Настройка выбранного этапа</h3>
+                <div className="designer-form-grid">
+                  <Field label="Название этапа" value={selectedStage.name} onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.name = value; })} />
+                  <Field label="Группа исполнителей" value={selectedStage.department} onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.department = value; })} />
+                  <Field label="SLA, часов" value={selectedStage.slaHours} type="number" onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.slaHours = Number(value) || 1; })} />
+                  <SelectField
+                    label="Шаблон автозадачи"
+                    value={selectedStage.autoTaskTemplateId}
+                    options={data.taskTemplates.map((item) => item.id)}
+                    onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.autoTaskTemplateId = value; })}
+                    formatOption={(value) => data.taskTemplates.find((item) => item.id === value)?.name ?? value}
+                  />
+                  <Field
+                    label="Обязательные результаты"
+                    value={selectedStage.requiredAttributes.join(', ')}
+                    onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.requiredAttributes = splitList(value); })}
+                    className="full"
+                  />
+                  <Field
+                    label="Поля формы этапа"
+                    value={(selectedStage.formFields ?? selectedStage.requiredAttributes).join(', ')}
+                    onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.formFields = splitList(value); })}
+                    className="full"
+                  />
+                  <Field label="Правило эскалации" value={selectedStage.escalationRule} onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.escalationRule = value; })} className="full" />
+                  <Field label="Обработка ошибки этапа" value={selectedStage.errorHandler ?? ''} onChange={(value) => updateStage(selectedStage.id, (stage) => { stage.errorHandler = value; })} className="full" />
                 </div>
-              ))}
-            </section>
-            <section>
-              <h3>Правила валидации</h3>
-              {template.validationRules.map((rule) => (
-                <p key={rule} className="rule-line">{rule}</p>
-              ))}
-            </section>
-            <section>
-              <h3>Интеграционные интерфейсы</h3>
-              {template.integrationRules.map((rule) => (
-                <p key={rule} className="rule-line">{rule}</p>
-              ))}
-            </section>
-          </div>
-        </section>
+              </div>
+            ) : null}
+
+            {canAdmin ? (
+              <div className="designer-stage-editor">
+                <h3>Добавить произвольный этап</h3>
+                <div className="designer-form-grid">
+                  <Field label="Название" value={stageDraft.name} onChange={(value) => setStageDraft((previous) => ({ ...previous, name: value }))} />
+                  <Field label="Группа" value={stageDraft.department} onChange={(value) => setStageDraft((previous) => ({ ...previous, department: value }))} />
+                  <Field label="SLA, часов" value={stageDraft.slaHours} type="number" onChange={(value) => setStageDraft((previous) => ({ ...previous, slaHours: Number(value) || 1 }))} />
+                  <SelectField label="Позиция" value={insertAfterStageId} options={insertPositionOptions} onChange={setInsertAfterStageId} formatOption={insertPositionLabel} />
+                  <SelectField
+                    label="Шаблон задачи"
+                    value={stageDraft.autoTaskTemplateId}
+                    options={data.taskTemplates.map((item) => item.id)}
+                    onChange={(value) => setStageDraft((previous) => ({ ...previous, autoTaskTemplateId: value }))}
+                    formatOption={(value) => data.taskTemplates.find((item) => item.id === value)?.name ?? value}
+                  />
+                  <Field label="Обязательные результаты" value={stageDraft.requiredAttributes} onChange={(value) => setStageDraft((previous) => ({ ...previous, requiredAttributes: value }))} className="full" />
+                  <Field label="Поля формы" value={stageDraft.formFields} onChange={(value) => setStageDraft((previous) => ({ ...previous, formFields: value }))} className="full" />
+                  <Field label="Эскалация" value={stageDraft.escalationRule} onChange={(value) => setStageDraft((previous) => ({ ...previous, escalationRule: value }))} className="full" />
+                  <Field label="Ошибка исполнения" value={stageDraft.errorHandler} onChange={(value) => setStageDraft((previous) => ({ ...previous, errorHandler: value }))} className="full" />
+                </div>
+                <div className="actions">
+                  <Button icon={Plus} variant="primary" onClick={addStage}>Добавить этап</Button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="panel designer-transitions">
+            <div className="panel-header">
+              <div>
+                <h2>Переходы и автосоздание задач</h2>
+                <p>Переход задает условие, действие пользователя и целевой этап. При включенном создании задачи исполнитель получает следующий этап автоматически.</p>
+              </div>
+              <Badge tone="blue">{visibleTransitions.length} переходов</Badge>
+            </div>
+            <div className="designer-transition-list">
+              {visibleTransitions.map((transition) => {
+                const fromStage = template.stages.find((stage) => stage.id === transition.fromStageId);
+                const toStage = template.stages.find((stage) => stage.id === transition.toStageId);
+                return (
+                  <article key={transition.id}>
+                    <div>
+                      <strong>
+                        {fromStage?.name ?? 'Этап не найден'} {'->'} {toStage?.name ?? 'Этап не найден'}
+                      </strong>
+                      <span>{transition.actionLabel} · {roleLabel(transition.role)} · {transition.createsTask ? 'создает задачу' : 'только меняет статус'}</span>
+                      <small>{transition.condition}</small>
+                    </div>
+                    {canAdmin ? <IconButton title="Удалить переход" icon={Trash2} onClick={() => deleteTransition(transition.id)} /> : null}
+                  </article>
+                );
+              })}
+            </div>
+            {canAdmin ? (
+              <div className="designer-stage-editor">
+                <h3>Добавить или заменить переход</h3>
+                <div className="designer-form-grid">
+                  <SelectField label="От этапа" value={transitionDraft.fromStageId} options={template.stages.map((stage) => stage.id)} onChange={(value) => setTransitionDraft((previous) => ({ ...previous, fromStageId: value }))} formatOption={(value) => template.stages.find((stage) => stage.id === value)?.name ?? value} />
+                  <SelectField label="К этапу" value={transitionDraft.toStageId} options={template.stages.map((stage) => stage.id)} onChange={(value) => setTransitionDraft((previous) => ({ ...previous, toStageId: value }))} formatOption={(value) => template.stages.find((stage) => stage.id === value)?.name ?? value} />
+                  <SelectField label="Роль действия" value={transitionDraft.role} options={transitionRoleOptions} onChange={(value) => setTransitionDraft((previous) => ({ ...previous, role: value }))} formatOption={roleLabel} />
+                  <label className="field checkbox-field">
+                    <span>Создавать задачу</span>
+                    <input type="checkbox" checked={transitionDraft.createsTask} onChange={(event) => setTransitionDraft((previous) => ({ ...previous, createsTask: event.target.checked }))} />
+                  </label>
+                  <Field label="Название действия" value={transitionDraft.actionLabel} onChange={(value) => setTransitionDraft((previous) => ({ ...previous, actionLabel: value }))} className="full" />
+                  <Field label="Условие перехода" value={transitionDraft.condition} onChange={(value) => setTransitionDraft((previous) => ({ ...previous, condition: value }))} className="full" />
+                </div>
+                <div className="actions">
+                  <Button icon={Plus} variant="primary" onClick={addTransition}>Сохранить переход</Button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="panel designer-settings-grid">
+            <div className="designer-setting-block">
+              <h2>Статусная модель</h2>
+              <div className="designer-chip-row">
+                {statusModel.map((status) => (
+                  <button key={status} onClick={() => deleteStatus(status)}>
+                    {status}
+                    <X size={12} />
+                  </button>
+                ))}
+              </div>
+              {canAdmin ? (
+                <div className="designer-inline-add">
+                  <SelectField label="Добавить статус" value={newStatus} options={statusOptions} onChange={setNewStatus} />
+                  <Button icon={Plus} onClick={addStatus}>Добавить</Button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="designer-setting-block">
+              <h2>Пользовательская форма</h2>
+              <div className="settings-list compact">
+                {template.attributes.map((attr) => (
+                  <div key={attr.id} className="setting-row designer-field-row">
+                    <span>{attr.name}</span>
+                    <Badge tone={attr.required ? 'amber' : 'neutral'}>{attr.type}</Badge>
+                    {canAdmin ? <IconButton title="Удалить поле" icon={Trash2} onClick={() => deleteField(attr.id)} /> : null}
+                  </div>
+                ))}
+              </div>
+              {canAdmin ? (
+                <div className="designer-form-grid">
+                  <Field label="Название поля" value={fieldDraft.name} onChange={(value) => setFieldDraft((previous) => ({ ...previous, name: value }))} />
+                  <SelectField label="Тип" value={fieldDraft.type} options={fieldTypeOptions} onChange={(value) => setFieldDraft((previous) => ({ ...previous, type: value }))} />
+                  <Field label="Источник справочника" value={fieldDraft.source ?? ''} onChange={(value) => setFieldDraft((previous) => ({ ...previous, source: value }))} />
+                  <label className="field checkbox-field">
+                    <span>Обязательное</span>
+                    <input type="checkbox" checked={fieldDraft.required} onChange={(event) => setFieldDraft((previous) => ({ ...previous, required: event.target.checked }))} />
+                  </label>
+                  <Field label="Формула / выражение" value={fieldDraft.formula ?? ''} onChange={(value) => setFieldDraft((previous) => ({ ...previous, formula: value }))} className="full" />
+                  <div className="actions full">
+                    <Button icon={Plus} onClick={addField}>Добавить поле</Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="designer-setting-block full">
+              <h2>Правила, интеграции и ошибки</h2>
+              <div className="designer-rules-grid">
+                {[
+                  ['validation', 'Валидация полей', template.validationRules],
+                  ['business', 'Бизнес-правила', template.businessRules ?? []],
+                  ['escalation', 'Эскалации', template.escalationRules ?? template.stages.map((stage) => stage.escalationRule)],
+                  ['integration', 'Синхронные интеграции', template.integrationRules],
+                  ['error', 'Обработка ошибок', template.errorHandlingRules ?? template.stages.map((stage) => stage.errorHandler).filter(Boolean)]
+                ].map(([kind, title, rules]) => (
+                  <section key={String(kind)}>
+                    <h3>{String(title)}</h3>
+                    {(rules as string[]).map((rule) => (
+                      <p key={rule} className="rule-line">
+                        <span>{rule}</span>
+                        {canAdmin ? <button onClick={() => deleteRule(kind as typeof ruleDraft.kind, rule)}>Удалить</button> : null}
+                      </p>
+                    ))}
+                  </section>
+                ))}
+              </div>
+              {canAdmin ? (
+                <div className="designer-form-grid">
+                  <SelectField
+                    label="Тип правила"
+                    value={ruleDraft.kind}
+                    options={['validation', 'business', 'escalation', 'integration', 'error']}
+                    onChange={(value) => setRuleDraft((previous) => ({ ...previous, kind: value }))}
+                    optionLabels={{
+                      validation: 'Валидация',
+                      business: 'Бизнес-правило',
+                      escalation: 'Эскалация',
+                      integration: 'Синхронная интеграция',
+                      error: 'Обработка ошибки'
+                    }}
+                  />
+                  <Field label="Выражение правила" value={ruleDraft.text} onChange={(value) => setRuleDraft((previous) => ({ ...previous, text: value }))} className="full" />
+                  <div className="actions full">
+                    <Button icon={Plus} onClick={addRule}>Добавить правило</Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="designer-setting-block">
+              <h2>Автопроверка БП</h2>
+              <div className={`designer-check ${lastCheck?.status ?? 'neutral'}`}>
+                {(lastCheck?.messages ?? ['Проверка еще не запускалась. Нажмите "Проверить БП" перед публикацией.']).map((message) => (
+                  <p key={message}>{message}</p>
+                ))}
+              </div>
+            </div>
+
+            <div className="designer-setting-block">
+              <h2>История версий</h2>
+              <div className="designer-version-list">
+                {versionHistory.slice(0, 5).map((version) => (
+                  <article key={`${version.version}-${version.changedAt}`}>
+                    <strong>v{version.version} · {version.status}</strong>
+                    <span>{formatDateTime(version.changedAt)} · этапов: {version.stagesCount}</span>
+                    <small>{version.changeSummary}</small>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
     </div>
   );
@@ -6432,27 +7439,158 @@ function DictionariesPage({
   const [selected, setSelected] = useState(data.dictionaries[0]?.id ?? '');
   const dictionary = data.dictionaries.find((item) => item.id === selected) ?? data.dictionaries[0];
   const canAdmin = role === 'admin';
+  const [recordQuery, setRecordQuery] = useState('');
+  const [fieldDraft, setFieldDraft] = useState({
+    name: 'Новое поле',
+    type: 'Строка' as DictionaryField['type'],
+    required: false,
+    source: '',
+    formula: ''
+  });
+  const [recordEditor, setRecordEditor] = useState<{
+    mode: 'create' | 'edit';
+    index: number | null;
+    values: Record<string, string | number | boolean>;
+  } | null>(null);
+  const fieldTypeOptions: DictionaryField['type'][] = ['Строка', 'Число', 'Дата', 'Время', 'Справочник', 'Множественный выбор', 'Формула', 'Да/Нет'];
+  const fieldKey = (field: DictionaryField) => field.id.replace(/^f-/, '') || field.id;
+  useEffect(() => {
+    setRecordEditor(null);
+    setRecordQuery('');
+  }, [selected]);
+  const columns = dictionary.fields.map((field) => ({ field, key: fieldKey(field) }));
+  const visibleRecords = dictionary.records
+    .map((record, index) => ({ record, index }))
+    .filter(({ record }) => normalize(Object.values(record).map((value) => String(value)).join(' ')).includes(normalize(recordQuery)));
+  const formatDictionaryValue = (value: string | number | boolean | undefined) => {
+    if (typeof value === 'boolean') return value ? 'Да' : 'Нет';
+    if (typeof value === 'number') return formatNumber(value);
+    return value === undefined || value === '' ? '-' : String(value);
+  };
+  const emptyRecord = () =>
+    dictionary.fields.reduce<Record<string, string | number | boolean>>((acc, field) => {
+      const key = fieldKey(field);
+      if (field.type === 'Да/Нет') acc[key] = false;
+      else acc[key] = '';
+      return acc;
+    }, {});
+  const openCreateRecord = () => {
+    if (!canAdmin) return;
+    setRecordEditor({ mode: 'create', index: null, values: emptyRecord() });
+  };
+  const openEditRecord = (index: number) => {
+    if (!canAdmin) return;
+    const record = dictionary.records[index];
+    setRecordEditor({ mode: 'edit', index, values: { ...emptyRecord(), ...record } });
+  };
+  const updateRecordValue = (key: string, value: string | number | boolean) => {
+    setRecordEditor((previous) => (previous ? { ...previous, values: { ...previous.values, [key]: value } } : previous));
+  };
+  const calculateFormulaValues = (values: Record<string, string | number | boolean>) => {
+    const normalizedValues = { ...values };
+    dictionary.fields
+      .filter((field) => field.type === 'Формула' && field.formula)
+      .forEach((field) => {
+        let expression = field.formula ?? '';
+        dictionary.fields.forEach((sourceField) => {
+          const sourceKey = fieldKey(sourceField);
+          const rawValue = normalizedValues[sourceKey];
+          const numericValue = Number(String(rawValue ?? 0).replace(',', '.')) || 0;
+          expression = expression.replace(new RegExp(sourceField.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(numericValue));
+        });
+        if (/^[\d+\-*/().\s]+$/.test(expression)) {
+          try {
+            const calculated = Function(`"use strict"; return (${expression});`)();
+            if (Number.isFinite(calculated)) normalizedValues[fieldKey(field)] = Math.round(calculated * 100) / 100;
+          } catch {
+            normalizedValues[fieldKey(field)] = 0;
+          }
+        }
+      });
+    return normalizedValues;
+  };
+  const normalizeRecord = (values: Record<string, string | number | boolean>) => {
+    const normalizedValues = calculateFormulaValues(values);
+    return dictionary.fields.reduce<Record<string, string | number | boolean>>((acc, field) => {
+      const key = fieldKey(field);
+      const rawValue = normalizedValues[key];
+      if (field.type === 'Число' || field.type === 'Формула') acc[key] = Number(String(rawValue ?? '').replace(',', '.')) || 0;
+      else if (field.type === 'Да/Нет') acc[key] = rawValue === true || rawValue === 'true' || rawValue === 'Да';
+      else acc[key] = String(rawValue ?? '').trim();
+      return acc;
+    }, {});
+  };
+  const saveRecord = () => {
+    if (!recordEditor || !canAdmin) return;
+    const calculatedValues = calculateFormulaValues(recordEditor.values);
+    const missing = dictionary.fields.filter(
+      (field) => field.required && field.type !== 'Формула' && String(calculatedValues[fieldKey(field)] ?? '').trim() === ''
+    );
+    if (missing.length) {
+      notify(`Заполните обязательные поля: ${missing.map((field) => field.name).join(', ')}`, 'warning');
+      return;
+    }
+    const nextRecord = normalizeRecord(calculatedValues);
+    mutate((draft) => {
+      const item = draft.dictionaries.find((dict) => dict.id === dictionary.id);
+      if (!item) return;
+      if (recordEditor.mode === 'edit' && recordEditor.index !== null) {
+        item.records[recordEditor.index] = nextRecord;
+        addAudit(draft, 'Изменение значения справочника', 'Справочник', item.name, 'Успешно', 'Действие администратора');
+      } else {
+        item.records.unshift(nextRecord);
+        addAudit(draft, 'Создание значения справочника', 'Справочник', item.name, 'Успешно', 'Действие администратора');
+      }
+    });
+    setRecordEditor(null);
+    notify(recordEditor.mode === 'edit' ? 'Справочное значение обновлено' : 'Справочное значение создано', 'success');
+  };
+  const deleteRecord = (index: number) => {
+    if (!canAdmin) return;
+    mutate((draft) => {
+      const item = draft.dictionaries.find((dict) => dict.id === dictionary.id);
+      if (!item) return;
+      item.records.splice(index, 1);
+      addAudit(draft, 'Удаление значения справочника', 'Справочник', item.name, 'Предупреждение', 'Действие администратора');
+    });
+    notify('Справочное значение удалено', 'warning');
+  };
 
   const addField = () => {
+    if (!fieldDraft.name.trim()) {
+      notify('Укажите название поля справочника', 'warning');
+      return;
+    }
     const field: DictionaryField = {
-      id: `f-extra-${dictionary.fields.length + 1}`,
-      name: 'Новое обязательное поле',
-      type: 'Строка',
-      required: true
+      id: `f-${Date.now()}`,
+      name: fieldDraft.name.trim(),
+      type: fieldDraft.type,
+      required: fieldDraft.required,
+      source: fieldDraft.source.trim() || undefined,
+      formula: fieldDraft.formula.trim() || undefined
     };
     mutate((draft) => {
       const item = draft.dictionaries.find((dict) => dict.id === dictionary.id);
-      item?.fields.push(field);
+      if (!item) return;
+      item.fields.push(field);
+      item.records = item.records.map((record) => ({ ...record, [fieldKey(field)]: field.type === 'Да/Нет' ? false : '' }));
       if (item) addAudit(draft, 'Добавление поля справочника', 'Справочник', item.name, 'Успешно', 'Действие администратора');
     });
-    notify('Поле добавлено, обязательность включена', 'success');
+    setFieldDraft({ name: 'Новое поле', type: 'Строка', required: false, source: '', formula: '' });
+    notify('Поле добавлено в структуру справочника', 'success');
   };
 
   const removeField = (fieldId: string) => {
     mutate((draft) => {
       const item = draft.dictionaries.find((dict) => dict.id === dictionary.id);
       if (!item) return;
+      const key = fieldKey(item.fields.find((field) => field.id === fieldId) ?? { id: fieldId, name: '', type: 'Строка', required: false });
       item.fields = item.fields.filter((field) => field.id !== fieldId);
+      item.records = item.records.map((record) => {
+        const nextRecord = { ...record };
+        delete nextRecord[key];
+        return nextRecord;
+      });
       addAudit(draft, 'Удаление поля справочника', 'Справочник', item.name, 'Предупреждение', 'Действие администратора');
     });
     notify('Поле справочника удалено', 'warning');
@@ -6463,14 +7601,14 @@ function DictionariesPage({
       <section className="toolbar band">
         <div>
           <h1>Справочники</h1>
-          <p>Настройка структуры, владельцев, типов данных, обязательности полей, формул и связей с сущностями.</p>
+          <p>Ведение рабочих классификаторов, используемых в карточках клиентов, процессах, задачах и расчетах.</p>
         </div>
         <div className="actions">
-          {canAdmin ? <Button icon={Plus} variant="primary" onClick={addField}>Добавить поле</Button> : null}
+          {canAdmin ? <Button icon={Plus} variant="primary" onClick={openCreateRecord}>Новая запись</Button> : null}
         </div>
       </section>
-      <div className="content-layout two-columns">
-        <section className="panel">
+      <div className="content-layout dictionaries-layout">
+        <section className="panel dictionary-sidebar">
           <div className="panel-header">
             <h2>Список справочников</h2>
           </div>
@@ -6486,19 +7624,69 @@ function DictionariesPage({
             ))}
           </div>
         </section>
-        <section className="panel">
+        <section className="panel dictionary-detail-panel">
           <div className="panel-header">
             <div>
               <h2>{dictionary.name}</h2>
               <p>{dictionary.description}</p>
             </div>
-            <Badge tone="cyan">Записей: {dictionary.records.length}</Badge>
+            <div className="actions">
+              <Badge tone="cyan">Записей: {dictionary.records.length}</Badge>
+              <Badge tone="neutral">Владелец: {getUserName(data, dictionary.ownerId)}</Badge>
+            </div>
           </div>
-          <div className="settings-list">
-            <section>
-              <h3>Поля</h3>
+
+          <div className="dictionary-toolbar">
+            <label className="global-search">
+              <Search size={16} />
+              <input value={recordQuery} onChange={(event) => setRecordQuery(event.target.value)} placeholder="Поиск по значениям справочника" />
+            </label>
+            {canAdmin ? <Button icon={Plus} onClick={openCreateRecord}>Добавить значение</Button> : null}
+          </div>
+
+          <div className="table-wrap dictionary-records-table">
+            <table>
+              <thead>
+                <tr>
+                  {columns.map(({ field, key }) => (
+                    <th key={key}>{field.name}</th>
+                  ))}
+                  {canAdmin ? <th>Действия</th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRecords.map(({ record, index }) => (
+                  <tr key={`${dictionary.id}-${index}`}>
+                    {columns.map(({ key }) => (
+                      <td key={key}>
+                        <strong>{formatDictionaryValue(record[key])}</strong>
+                      </td>
+                    ))}
+                    {canAdmin ? (
+                      <td>
+                        <div className="row-actions">
+                          <IconButton title="Редактировать значение" icon={Edit} onClick={() => openEditRecord(index)} />
+                          <IconButton title="Удалить значение" icon={Trash2} onClick={() => deleteRecord(index)} />
+                        </div>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!visibleRecords.length ? <EmptyState title="Значения не найдены" text="Измените поисковый запрос или добавьте новую запись справочника." /> : null}
+          </div>
+
+          <section className="dictionary-fields-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>Структура справочника</h2>
+                <p>Поля определяют форму добавления и редактирования значений.</p>
+              </div>
+            </div>
+            <div className="dictionary-field-list">
               {dictionary.fields.map((field) => (
-                <div key={field.id} className="setting-row">
+                <div key={field.id} className="setting-row dictionary-field-row">
                   <span>
                     <strong>{field.name}</strong>
                     <small>{field.source || field.formula || 'ручной ввод'}</small>
@@ -6507,29 +7695,67 @@ function DictionariesPage({
                   {canAdmin ? <IconButton title="Удалить поле" icon={Trash2} onClick={() => removeField(field.id)} /> : null}
                 </div>
               ))}
-            </section>
-            <section>
-              <h3>Данные</h3>
-              <div className="table-wrap">
-                <table>
-                  <tbody>
-                    {dictionary.records.map((record, index) => (
-                      <tr key={index}>
-                        {Object.entries(record).map(([key, value]) => (
-                          <td key={key}>
-                            <small>{key}</small>
-                            <strong>{String(value)}</strong>
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            </div>
+            {canAdmin ? (
+              <div className="dictionary-add-field">
+                <Field label="Новое поле" value={fieldDraft.name} onChange={(value) => setFieldDraft((previous) => ({ ...previous, name: value }))} />
+                <SelectField label="Тип" value={fieldDraft.type} options={fieldTypeOptions} onChange={(value) => setFieldDraft((previous) => ({ ...previous, type: value }))} />
+                <Field label="Источник" value={fieldDraft.source} onChange={(value) => setFieldDraft((previous) => ({ ...previous, source: value }))} />
+                <Field label="Формула" value={fieldDraft.formula} onChange={(value) => setFieldDraft((previous) => ({ ...previous, formula: value }))} />
+                <label className="field checkbox-field">
+                  <span>Обязательное</span>
+                  <input type="checkbox" checked={fieldDraft.required} onChange={(event) => setFieldDraft((previous) => ({ ...previous, required: event.target.checked }))} />
+                </label>
+                <Button icon={Plus} onClick={addField}>Добавить поле</Button>
               </div>
-            </section>
-          </div>
+            ) : null}
+          </section>
         </section>
       </div>
+      {recordEditor ? (
+        <Modal title={recordEditor.mode === 'edit' ? 'Редактирование значения' : 'Новое значение справочника'} onClose={() => setRecordEditor(null)} width="medium">
+          <div className="modal-form">
+            <div className="form-grid">
+              {dictionary.fields.map((field) => {
+                const key = fieldKey(field);
+                const previewValues = calculateFormulaValues(recordEditor.values);
+                const value = previewValues[key] ?? recordEditor.values[key] ?? '';
+                if (field.type === 'Да/Нет') {
+                  return (
+                    <SelectField
+                      key={field.id}
+                      label={field.name}
+                      value={String(recordEditor.values[key] === true) as 'true' | 'false'}
+                      options={['true', 'false']}
+                      onChange={(nextValue) => updateRecordValue(key, nextValue === 'true')}
+                      optionLabels={{ true: 'Да', false: 'Нет' }}
+                      required={field.required}
+                    />
+                  );
+                }
+                return (
+                  <label key={field.id} className="field">
+                    <span>
+                      {field.name}
+                      {field.required ? <b>*</b> : null}
+                    </span>
+                    <input
+                      value={String(value)}
+                      type={field.type === 'Число' || field.type === 'Формула' ? 'number' : field.type === 'Дата' ? 'date' : field.type === 'Время' ? 'time' : 'text'}
+                      disabled={field.type === 'Формула'}
+                      onChange={(event) => updateRecordValue(key, event.target.value)}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+            <footer className="modal-actions">
+              <Button onClick={() => setRecordEditor(null)}>Отменить</Button>
+              <Button icon={Save} variant="primary" onClick={saveRecord}>Сохранить</Button>
+            </footer>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }

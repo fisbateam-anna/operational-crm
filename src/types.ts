@@ -165,6 +165,45 @@ export interface ProcessStage {
   autoTaskTemplateId: string;
   requiredAttributes: string[];
   escalationRule: string;
+  formFields?: string[];
+  errorHandler?: string;
+}
+
+export interface ProcessTransition {
+  id: string;
+  fromStageId: string;
+  toStageId: string;
+  condition: string;
+  actionLabel: string;
+  createsTask: boolean;
+  role: RoleKey | 'Любая роль';
+}
+
+export interface ProcessTemplateSnapshot {
+  name: string;
+  processType?: string;
+  partyKinds?: ('ЮЛ' | 'ФЛ')[];
+  trigger: 'Ручной запуск' | 'Событие ИС' | 'Таймер' | 'API';
+  entityTypes: string[];
+  attributes: DictionaryField[];
+  stages: ProcessStage[];
+  statusModel?: ProcessStatus[];
+  transitions?: ProcessTransition[];
+  validationRules: string[];
+  businessRules?: string[];
+  escalationRules?: string[];
+  integrationRules: string[];
+  errorHandlingRules?: string[];
+}
+
+export interface ProcessTemplateVersion {
+  version: number;
+  status: 'Актуальная' | 'Черновик' | 'Архивная';
+  changedAt: string;
+  authorId: string;
+  changeSummary: string;
+  stagesCount: number;
+  snapshot?: ProcessTemplateSnapshot;
 }
 
 export interface ProcessTemplate {
@@ -178,8 +217,14 @@ export interface ProcessTemplate {
   entityTypes: string[];
   attributes: DictionaryField[];
   stages: ProcessStage[];
+  statusModel?: ProcessStatus[];
+  transitions?: ProcessTransition[];
   validationRules: string[];
+  businessRules?: string[];
+  escalationRules?: string[];
   integrationRules: string[];
+  errorHandlingRules?: string[];
+  versionHistory?: ProcessTemplateVersion[];
 }
 
 export interface ProcessInstance {
