@@ -148,6 +148,44 @@ export interface Task {
   history: TaskHistoryEntry[];
 }
 
+export type CustomerNeedStage =
+  | 'Новая'
+  | 'Уточнение'
+  | 'Подбор решения'
+  | 'Согласование'
+  | 'Оформление'
+  | 'Реализована'
+  | 'Отложена'
+  | 'Отказ';
+
+export type CustomerNeedCategory =
+  | 'Подключение продукта или сервиса'
+  | 'Изменение условий'
+  | 'Консультация'
+  | 'Сервисный запрос'
+  | 'Документы и договор'
+  | 'Актуализация данных';
+
+export interface CustomerNeed {
+  id: string;
+  counterpartyId: string;
+  title: string;
+  category: CustomerNeedCategory;
+  stage: CustomerNeedStage;
+  priority: Priority;
+  source: string;
+  ownerId: string;
+  createdAt: string;
+  dueDate: string;
+  expectedEffect?: number;
+  nextAction: string;
+  result?: string;
+  communicationIds: string[];
+  taskIds: string[];
+  processIds: string[];
+  history: TaskHistoryEntry[];
+}
+
 export interface TaskTemplate {
   id: string;
   name: string;
@@ -600,6 +638,7 @@ export interface SavedFilter {
 export interface AppData {
   users: User[];
   counterparties: Counterparty[];
+  customerNeeds: CustomerNeed[];
   taskTemplates: TaskTemplate[];
   tasks: Task[];
   processTemplates: ProcessTemplate[];

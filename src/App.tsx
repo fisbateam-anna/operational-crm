@@ -86,6 +86,9 @@ import type {
   Counterparty,
   CounterpartyStatus,
   CounterpartyType,
+  CustomerNeed,
+  CustomerNeedCategory,
+  CustomerNeedStage,
   DictionaryField,
   DocumentStatus,
   EvdApprovalStep,
@@ -111,6 +114,7 @@ import type {
   ProcessInstance,
   ProcessStatus,
   RoleKey,
+  StatusTone,
 	  SavedFilter,
 	  Task,
 	  TaskLinkRule,
@@ -178,6 +182,11 @@ interface CommunicationFormValues {
   detectedIntent: string;
   routeGroup: string;
   startAppealProcess: boolean;
+  createNeed: boolean;
+  needCategory: CustomerNeedCategory;
+  needTitle: string;
+  needStage: CustomerNeedStage;
+  needExpectedEffect: string;
   createTask: boolean;
   taskGroup: string;
   taskAssigneeId?: string;
@@ -344,6 +353,26 @@ const communicationRequestCategories: CommunicationRequestCategory[] = [
   'Сервисный инцидент',
   'Внутренний запрос'
 ];
+const customerNeedCategories: CustomerNeedCategory[] = [
+  'Подключение продукта или сервиса',
+  'Изменение условий',
+  'Консультация',
+  'Сервисный запрос',
+  'Документы и договор',
+  'Актуализация данных'
+];
+const customerNeedStages: CustomerNeedStage[] = ['Новая', 'Уточнение', 'Подбор решения', 'Согласование', 'Оформление', 'Реализована', 'Отложена', 'Отказ'];
+const activeNeedStages: CustomerNeedStage[] = ['Новая', 'Уточнение', 'Подбор решения', 'Согласование', 'Оформление'];
+const needStageTone: Record<CustomerNeedStage, StatusTone> = {
+  Новая: 'blue',
+  Уточнение: 'cyan',
+  'Подбор решения': 'violet',
+  Согласование: 'amber',
+  Оформление: 'green',
+  Реализована: 'green',
+  Отложена: 'neutral',
+  Отказ: 'red'
+};
 const requestRouteByCategory: Record<CommunicationRequestCategory, string> = {
   Консультация: 'Центр клиентских коммуникаций',
   'Обращение по операции': 'Управление операционного сопровождения',
@@ -538,6 +567,33 @@ const buildDetectedIntent = (counterparty?: Counterparty, category: Communicatio
   if (category === 'Сервисный инцидент') return `${name} сообщает о сбое подключенного сервиса и ожидает срок восстановления.`;
   if (category === 'Внутренний запрос') return `Нужно запросить позицию внутреннего подразделения по обращению ${name}.`;
   return `${name} обратился за консультацией по обслуживанию.`;
+};
+const getNeedCategoryByRequest = (category: CommunicationRequestCategory): CustomerNeedCategory => {
+  if (category === 'Документы или договор') return 'Документы и договор';
+  if (category === 'Актуализация данных') return 'Актуализация данных';
+  if (category === 'Сервисный инцидент') return 'Сервисный запрос';
+  if (category === 'Срок или статус процесса') return 'Сервисный запрос';
+  if (category === 'Обращение по операции') return 'Сервисный запрос';
+  return 'Консультация';
+};
+const buildNeedTitle = (counterparty?: Counterparty, category: CustomerNeedCategory = 'Консультация') => {
+  const name = counterparty?.shortName ?? 'клиент';
+  if (category === 'Подключение продукта или сервиса') return `Подключение сервиса для ${name}`;
+  if (category === 'Изменение условий') return `Изменение условий обслуживания ${name}`;
+  if (category === 'Сервисный запрос') return `Сервисный запрос ${name}`;
+  if (category === 'Документы и договор') return `Документы и договорные условия ${name}`;
+  if (category === 'Актуализация данных') return `Актуализация данных ${name}`;
+  return `Консультация и подбор решения для ${name}`;
+};
+const hasNeedCommercialPotential = (need: CustomerNeed) =>
+  Boolean(need.expectedEffect) && ['Подключение продукта или сервиса', 'Изменение условий'].includes(need.category);
+const getNeedImpactLabel = (need: CustomerNeed) => {
+  if (hasNeedCommercialPotential(need)) return `${formatNumber(need.expectedEffect ?? 0)} руб./год`;
+  if (need.category === 'Сервисный запрос') return need.priority === 'Критичный' ? 'критично для SLA' : 'влияет на срок ответа';
+  if (need.category === 'Документы и договор') return 'обязательство по документу';
+  if (need.category === 'Актуализация данных') return 'качество профиля';
+  if (need.category === 'Консультация') return 'информационный запрос';
+  return 'без финансовой оценки';
 };
 const getNextSequentialId = (prefix: string, ids: string[], floor: number, pad = 4) => {
   const maxNumber = Math.max(
@@ -2330,8 +2386,10 @@ function App() {
     const taskId = payload.createTask || startsAppealProcess ? getNextSequentialId('TASK-', data.tasks.map((item) => item.id), 2180, 4) : undefined;
     const processId = startsAppealProcess ? getNextSequentialId('BP-2026-', data.processes.map((item) => item.id), 170, 4) : payload.processId || undefined;
     const integrationId = getNextSequentialId('INT-', data.integrations.map((item) => item.id), 620, 3);
+    const needId = payload.createNeed ? getNextSequentialId('NEED-', data.customerNeeds.map((item) => item.id), 410, 3) : undefined;
     const createdProcessId = startsAppealProcess ? processId : '';
     const createdTaskId = taskId ?? '';
+    const createdNeedId = needId ?? '';
 
     mutate((draft) => {
       const counterparty = draft.counterparties.find((item) => item.id === payload.counterpartyId);
@@ -2473,7 +2531,7 @@ function App() {
           completedFields,
           fieldResults,
           timeSpentHours: 0,
-          links: [payload.counterpartyId, process?.id, communicationId].filter(Boolean) as string[],
+          links: [payload.counterpartyId, process?.id, communicationId, needId].filter(Boolean) as string[],
           comments: [
             startsAppealProcess
               ? `Создана автоматически из входящего обращения. Маршрут: ${routeGroup}.`
@@ -2515,16 +2573,47 @@ function App() {
         }));
         addAudit(draft, startsAppealProcess ? 'Автоматическое создание задачи процесса обращения' : 'Автоматическое создание follow-up задачи', 'Задача', taskId, 'Успешно', 'Системное событие');
       }
+      if (needId) {
+        draft.customerNeeds.unshift({
+          id: needId,
+          counterpartyId: payload.counterpartyId,
+          title: payload.needTitle || buildNeedTitle(counterparty, payload.needCategory),
+          category: payload.needCategory,
+          stage: payload.needStage,
+          priority: startsAppealProcess ? 'Высокий' : payload.requestCategory === 'Сервисный инцидент' ? 'Критичный' : 'Средний',
+          source: `${payload.type}${payload.channel ? ` · ${payload.channel}` : ''}`,
+          ownerId: currentUser.id,
+          createdAt: payload.at,
+          dueDate: payload.taskDueDate,
+          expectedEffect: Number(payload.needExpectedEffect || 0) || undefined,
+          nextAction: payload.nextAction,
+          communicationIds: [communicationId],
+          taskIds: taskId ? [taskId] : [],
+          processIds: process?.id ? [process.id] : [],
+          history: [
+            {
+              at: payload.at,
+              actorId: currentUser.id,
+              action: 'Потребность зафиксирована из коммуникации',
+              details: `${payload.needCategory}: ${payload.detectedIntent || payload.summary}`,
+              status: 'Новая'
+            }
+          ]
+        });
+        addAudit(draft, 'Фиксация потребности клиента', 'Потребность', needId);
+      }
       addAudit(draft, payload.status === 'Запланирована' ? 'Планирование коммуникации' : 'Фиксация итогов коммуникации', 'Коммуникация', communicationId);
       if (createdProcessId) addAudit(draft, 'Автоматический запуск процесса по обращению', 'Процесс', createdProcessId, 'Успешно', 'Системное событие');
     });
     setModal(createdTaskId ? { type: 'taskDetail', id: createdTaskId } : null);
     notify(
       startsAppealProcess && createdProcessId
-        ? `Обращение зарегистрировано, процесс ${createdProcessId} и задача ${createdTaskId} созданы`
+        ? `Обращение зарегистрировано, процесс ${createdProcessId} и задача ${createdTaskId} созданы${createdNeedId ? `, потребность ${createdNeedId} зафиксирована` : ''}`
         : createdTaskId
-          ? `Коммуникация сохранена, создана связанная задача ${createdTaskId}`
-          : 'Коммуникация сохранена в карточке',
+          ? `Коммуникация сохранена, создана связанная задача ${createdTaskId}${createdNeedId ? ` и потребность ${createdNeedId}` : ''}`
+          : createdNeedId
+            ? `Коммуникация сохранена, потребность ${createdNeedId} зафиксирована`
+            : 'Коммуникация сохранена в карточке',
       'success'
     );
   };
@@ -3640,7 +3729,7 @@ function KpiCard({
   value: string | number;
   detail: string;
   icon: LucideIcon;
-  tone?: 'blue' | 'green' | 'amber' | 'red' | 'cyan';
+  tone?: 'blue' | 'green' | 'amber' | 'red' | 'cyan' | 'violet';
   onClick: () => void;
 }) {
   return (
@@ -3973,6 +4062,9 @@ function DashboardPage({
   const activePortfolioCount = data.counterparties.filter((item) => item.status === 'Активен').length;
   const portfolioScope = role === 'curator' ? 'Все ФЛ и ЮЛ, доступные Куратору CRM' : 'Все ФЛ и ЮЛ в доступе роли';
   const openTasks = data.tasks.filter((task) => !['Выполнена', 'Отменена'].includes(task.status));
+  const activeNeeds = data.customerNeeds.filter((need) => activeNeedStages.includes(need.stage));
+  const highPriorityNeeds = activeNeeds.filter((need) => need.priority === 'Высокий' || need.priority === 'Критичный');
+  const needsExpectedEffect = activeNeeds.filter(hasNeedCommercialPotential).reduce((sum, need) => sum + (need.expectedEffect ?? 0), 0);
   const dueSoonTasks = openTasks.filter((task) => daysBetween(task.dueDate) >= 0 && daysBetween(task.dueDate) <= 2);
   const integrationErrors = data.integrations.filter((item) => item.status === 'Ошибка');
   const autoTasks = data.tasks.filter((task) => task.history.some((entry) => entry.action.includes('Создана'))).length;
@@ -4159,6 +4251,17 @@ function DashboardPage({
           tone={sla >= 85 ? 'green' : 'amber'}
           onClick={() => navigate({ page: 'reports' })}
         />
+        <KpiCard
+          label="Потребности клиентов"
+          value={activeNeeds.length}
+          detail={`${highPriorityNeeds.length} приоритетные · потенциал ${formatNumber(needsExpectedEffect)} руб./год`}
+          icon={BriefcaseBusiness}
+          tone="violet"
+          onClick={() => {
+            const firstNeed = activeNeeds[0] ?? data.customerNeeds[0];
+            if (firstNeed) navigate({ page: 'counterparty', id: firstNeed.counterpartyId, tab: 'needs' });
+          }}
+        />
       </section>
 
       <div className="dashboard-analytics-grid">
@@ -4248,6 +4351,7 @@ function DashboardPage({
           </div>
           <BarChart values={departmentLoad} onSelect={(item) => navigate({ page: 'tasks', filter: { group: item.id ?? item.label } })} />
         </section>
+
       </div>
 
       <div className="content-layout two-columns dashboard-focus-grid">
@@ -5055,6 +5159,7 @@ function CounterpartyDetailPage({
 }) {
   const item = getCounterparty(data, id);
   const activeTab = tab === 'integrations' ? 'history' : tab ?? 'profile';
+  const [needStageFilter, setNeedStageFilter] = useState<CustomerNeedStage | 'Все'>('Все');
   if (!item) return <EmptyState title="Контрагент не найден" text="Откройте объект из реестра или через глобальный поиск." />;
 
   const isIndividual = isIndividualCounterparty(item);
@@ -5062,6 +5167,26 @@ function CounterpartyDetailPage({
   const tasks = data.tasks.filter((task) => task.counterpartyId === item.id);
   const documents = data.documents.filter((document) => document.linkedObjectId === item.id || processes.some((process) => process.id === document.linkedObjectId));
   const communications = data.communications.filter((communication) => communication.counterpartyId === item.id);
+  const needs = data.customerNeeds.filter((need) => need.counterpartyId === item.id);
+  const needPriorityRank: Record<Priority, number> = { Критичный: 0, Высокий: 1, Средний: 2, Низкий: 3 };
+  const sortedNeeds = [...needs].sort((left, right) => {
+    const leftActive = activeNeedStages.includes(left.stage) ? 0 : 1;
+    const rightActive = activeNeedStages.includes(right.stage) ? 0 : 1;
+    return (
+      leftActive - rightActive ||
+      daysBetween(left.dueDate) - daysBetween(right.dueDate) ||
+      needPriorityRank[left.priority] - needPriorityRank[right.priority] ||
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    );
+  });
+  const effectiveNeedStageFilter = needStageFilter === 'Все' || needs.some((need) => need.stage === needStageFilter) ? needStageFilter : 'Все';
+  const visibleNeeds = effectiveNeedStageFilter === 'Все' ? sortedNeeds : sortedNeeds.filter((need) => need.stage === effectiveNeedStageFilter);
+  const activeCounterpartyNeeds = needs.filter((need) => activeNeedStages.includes(need.stage));
+  const overdueNeeds = activeCounterpartyNeeds.filter((need) => daysBetween(need.dueDate) < 0);
+  const dueSoonNeeds = activeCounterpartyNeeds.filter((need) => daysBetween(need.dueDate) >= 0 && daysBetween(need.dueDate) <= 2);
+  const totalNeedEffect = activeCounterpartyNeeds.filter(hasNeedCommercialPotential).reduce((sum, need) => sum + (need.expectedEffect ?? 0), 0);
+  const decisionNeeds = activeCounterpartyNeeds.filter((need) => ['Согласование', 'Оформление'].includes(need.stage));
+  const needStageFilterOptions: (CustomerNeedStage | 'Все')[] = ['Все', ...customerNeedStages.filter((stage) => needs.some((need) => need.stage === stage))];
   const completeness = calculateProfileCompleteness(item, data);
   const risk = calculateOperationalRisk(item, data);
   const canEdit = role === 'curator' || role === 'admin';
@@ -5179,6 +5304,7 @@ function CounterpartyDetailPage({
 
   const tabs = [
     ['profile', 'Общая информация'],
+    ['needs', 'Потребности'],
     ['processes', 'Процессы'],
     ['tasks', 'Задачи'],
     ['documents', 'Документы'],
@@ -5465,6 +5591,150 @@ function CounterpartyDetailPage({
 
       {activeTab === 'processes' ? (
         <LinkedProcesses data={data} processes={processes} navigate={navigate} createEvd={createEvd} />
+      ) : null}
+
+      {activeTab === 'needs' ? (
+        <section className="panel needs-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Потребности клиента</h2>
+              <p>
+                {activeCounterpartyNeeds.length
+                  ? 'Клиентские запросы, потребности и потенциальные изменения условий'
+                  : 'Активных потребностей нет'}
+              </p>
+            </div>
+            <div className="actions">
+              <Button icon={Phone} variant="primary" onClick={() => openModal({ type: 'communication', counterpartyId: item.id, preset: 'incomingCall' })}>
+                Входящий контакт
+              </Button>
+              <Button icon={Plus} onClick={() => openModal({ type: 'communication', counterpartyId: item.id, preset: 'appeal' })}>
+                Зафиксировать обращение
+              </Button>
+            </div>
+          </div>
+
+          <div className="need-summary-grid">
+            <article>
+              <span>Активные</span>
+              <strong>{activeCounterpartyNeeds.length}</strong>
+              <small>в стадиях до результата</small>
+            </article>
+            <article className={overdueNeeds.length ? 'danger' : dueSoonNeeds.length ? 'warning' : ''}>
+              <span>Сроки</span>
+              <strong>{overdueNeeds.length ? overdueNeeds.length : dueSoonNeeds.length}</strong>
+              <small>{overdueNeeds.length ? 'просрочено' : dueSoonNeeds.length ? 'до 2 дней' : 'без срочных сроков'}</small>
+            </article>
+            <article>
+              <span>Потенциал</span>
+              <strong>{formatNumber(totalNeedEffect)}</strong>
+              <small>руб./год по продуктам и условиям</small>
+            </article>
+            <article className={decisionNeeds.length ? 'warning' : ''}>
+              <span>На решении</span>
+              <strong>{decisionNeeds.length}</strong>
+              <small>согласование или оформление</small>
+            </article>
+          </div>
+
+          <div className="need-stage-strip">
+            {needStageFilterOptions.map((stage) => {
+              const stageNeeds = stage === 'Все' ? needs : needs.filter((need) => need.stage === stage);
+              const stageEffect = stageNeeds.filter(hasNeedCommercialPotential).reduce((sum, need) => sum + (need.expectedEffect ?? 0), 0);
+              return (
+                <button key={stage} className={effectiveNeedStageFilter === stage ? 'active' : ''} onClick={() => setNeedStageFilter(stage)}>
+                  <span>{stage}</span>
+                  <strong>{stageNeeds.length}</strong>
+                  <small>{stageEffect ? `${formatNumber(stageEffect)} руб./год` : 'без потенциала'}</small>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="needs-worklist">
+            {needs.length ? (
+              visibleNeeds.map((need) => {
+                const needTasks = need.taskIds.map((taskId) => getTask(data, taskId)).filter((task): task is Task => Boolean(task));
+                const needProcesses = need.processIds.map((processId) => getProcess(data, processId)).filter((process): process is ProcessInstance => Boolean(process));
+                const needCommunications = need.communicationIds.map((communicationId) => data.communications.find((communication) => communication.id === communicationId)).filter((communication): communication is Communication => Boolean(communication));
+                const openNeedTasks = needTasks.filter((task) => !['Выполнена', 'Отменена'].includes(task.status));
+                const firstOpenNeedTask = openNeedTasks[0] ?? needTasks[0];
+                const activeNeedProcess = needProcesses.find((process) => !['Завершен', 'Остановлен'].includes(process.status)) ?? needProcesses[0];
+                const dueDelta = daysBetween(need.dueDate);
+                const isNeedOverdue = dueDelta < 0 && activeNeedStages.includes(need.stage);
+                const isNeedDueSoon = dueDelta >= 0 && dueDelta <= 2 && activeNeedStages.includes(need.stage);
+                const primaryAction = firstOpenNeedTask
+                  ? { label: 'Продолжить', icon: ClipboardCheck, onClick: () => openModal({ type: 'taskDetail', id: firstOpenNeedTask.id }) }
+                  : activeNeedProcess
+                    ? { label: 'Продолжить', icon: Workflow, onClick: () => navigate({ page: 'process', id: activeNeedProcess.id, tab: 'route' }) }
+                    : { label: 'Создать задачу', icon: Plus, onClick: () => openModal({ type: 'taskForm', counterpartyId: item.id }) };
+                return (
+                  <article key={need.id} className={`need-work-card ${isNeedOverdue ? 'danger' : isNeedDueSoon ? 'warning' : ''}`}>
+                    <div className="need-work-main">
+                      <div className="need-work-title">
+                        <strong>{need.title}</strong>
+                        <small>{need.id} · {need.category}</small>
+                      </div>
+                      <div className="badge-row">
+                        <Badge tone={needStageTone[need.stage]}>{need.stage}</Badge>
+                        <Badge tone={priorityTone(need.priority)}>{need.priority}</Badge>
+                        <Badge tone={isNeedOverdue ? 'red' : isNeedDueSoon ? 'amber' : 'neutral'}>
+                          {isNeedOverdue ? `Просрочено ${Math.abs(dueDelta)} дн.` : dueDelta === 0 ? 'Срок сегодня' : `Срок ${formatDate(need.dueDate)}`}
+                        </Badge>
+                      </div>
+                      <div className="need-decision">
+                        <span>Следующий шаг</span>
+                        <strong>{need.nextAction}</strong>
+                      </div>
+                    </div>
+
+                    <div className="need-work-facts">
+                      <Info label="Источник" value={need.source} />
+                      <Info label="Ответственный" value={getUserName(data, need.ownerId)} />
+                      <Info label="Влияние" value={getNeedImpactLabel(need)} />
+                      <Info label="Создана" value={formatDateTime(need.createdAt)} />
+                    </div>
+
+                    <div className="need-link-strip">
+                      {firstOpenNeedTask ? (
+                        <button onClick={() => openModal({ type: 'taskDetail', id: firstOpenNeedTask.id })}>
+                          <ClipboardCheck size={14} />
+                          {firstOpenNeedTask.id}
+                        </button>
+                      ) : null}
+                      {activeNeedProcess ? (
+                        <button onClick={() => navigate({ page: 'process', id: activeNeedProcess.id, tab: 'route' })}>
+                          <Workflow size={14} />
+                          {activeNeedProcess.id}
+                        </button>
+                      ) : null}
+                      {needCommunications.length ? (
+                        <button onClick={() => navigate({ page: 'counterparty', id: item.id, tab: 'communications' })}>
+                          <MessageSquare size={14} />
+                          {needCommunications.length} контакт.
+                        </button>
+                      ) : null}
+                      {!firstOpenNeedTask && !activeNeedProcess && !needCommunications.length ? <span>Рабочие объекты пока не привязаны</span> : null}
+                    </div>
+
+                    <div className="need-work-actions">
+                      <Button icon={primaryAction.icon} variant="primary" onClick={primaryAction.onClick}>
+                        {primaryAction.label}
+                      </Button>
+                      <Button icon={MessageSquare} onClick={() => openModal({ type: 'communication', counterpartyId: item.id, preset: 'incomingCall' })}>
+                        Контакт
+                      </Button>
+                    </div>
+                    {need.result ? <p className="need-result">{need.result}</p> : null}
+                  </article>
+                );
+              })
+            ) : (
+              <EmptyState title="Потребности не зафиксированы" text="Начните с входящего контакта или обращения, чтобы связать запрос клиента с задачами и процессами." />
+            )}
+            {needs.length && !visibleNeeds.length ? <EmptyState title="По выбранной стадии потребностей нет" text="Выберите другую стадию или зафиксируйте новую потребность из входящего контакта." /> : null}
+          </div>
+        </section>
       ) : null}
 
       {activeTab === 'tasks' ? (
@@ -11561,6 +11831,7 @@ function CommunicationModal({
   const initialRequestCategory = getDefaultRequestCategory(initialCounterparty, preset);
   const initialRouteGroup = getRequestRouteGroup(initialRequestCategory, initialCounterparty);
   const initialIntent = buildDetectedIntent(initialCounterparty, initialRequestCategory);
+  const initialNeedCategory = getNeedCategoryByRequest(initialRequestCategory);
   const [form, setForm] = useState<CommunicationFormValues>({
     counterpartyId: defaultCounterpartyId,
     type: preset ? 'Обращение' : 'Звонок',
@@ -11585,6 +11856,11 @@ function CommunicationModal({
     detectedIntent: initialIntent,
     routeGroup: initialRouteGroup,
     startAppealProcess: Boolean(preset),
+    createNeed: Boolean(preset),
+    needCategory: initialNeedCategory,
+    needTitle: buildNeedTitle(initialCounterparty, initialNeedCategory),
+    needStage: 'Уточнение',
+    needExpectedEffect: initialCounterparty?.customerValue ? String(Math.round(initialCounterparty.customerValue * 0.12)) : isIndividualCounterparty(initialCounterparty) ? '15000' : '240000',
     createTask: true,
     taskGroup: initialRouteGroup,
     taskAssigneeId: '',
@@ -11608,9 +11884,12 @@ function CommunicationModal({
   const updateForm = <K extends keyof CommunicationFormValues>(key: K, value: CommunicationFormValues[K]) => setForm((current) => ({ ...current, [key]: value }));
   const updateRequestCategory = (value: CommunicationRequestCategory) => {
     const routeGroup = getRequestRouteGroup(value, selectedCounterparty);
+    const needCategory = getNeedCategoryByRequest(value);
     setForm((current) => ({
       ...current,
       requestCategory: value,
+      needCategory,
+      needTitle: current.needTitle === buildNeedTitle(selectedCounterparty, current.needCategory) ? buildNeedTitle(selectedCounterparty, needCategory) : current.needTitle,
       routeGroup,
       taskGroup: routeGroup,
       taskAssigneeId: data.users.some((user) => user.id === current.taskAssigneeId && user.department === routeGroup) ? current.taskAssigneeId : '',
@@ -11644,6 +11923,7 @@ function CommunicationModal({
             onChange={(event) => {
               const nextCounterparty = getCounterparty(data, event.target.value);
               const nextCategory = getDefaultRequestCategory(nextCounterparty, preset);
+              const nextNeedCategory = getNeedCategoryByRequest(nextCategory);
               const nextRouteGroup = getRequestRouteGroup(nextCategory, nextCounterparty);
               const previousIntent = buildDetectedIntent(selectedCounterparty, form.requestCategory);
               const nextIntent = buildDetectedIntent(nextCounterparty, nextCategory);
@@ -11654,6 +11934,9 @@ function CommunicationModal({
                 subject: nextCounterparty ? `${preset ? 'Входящее обращение' : 'Контакт'} с ${nextCounterparty.shortName}` : current.subject,
                 participants: nextCounterparty?.contacts.map((contact) => contact.name).join(', ') ?? current.participants,
                 requestCategory: nextCategory,
+                needCategory: nextNeedCategory,
+                needTitle: current.needTitle === buildNeedTitle(selectedCounterparty, current.needCategory) ? buildNeedTitle(nextCounterparty, nextNeedCategory) : current.needTitle,
+                needExpectedEffect: current.needExpectedEffect || (nextCounterparty?.customerValue ? String(Math.round(nextCounterparty.customerValue * 0.12)) : isIndividualCounterparty(nextCounterparty) ? '15000' : '240000'),
                 routeGroup: nextRouteGroup,
                 taskGroup: nextRouteGroup,
                 taskAssigneeId: '',
@@ -11738,6 +12021,34 @@ function CommunicationModal({
           <textarea value={form.summary} onChange={(event) => updateForm('summary', event.target.value)} />
         </label>
         <Field label="Следующий шаг" value={form.nextAction} onChange={(value) => updateForm('nextAction', value)} required className="full" />
+        <label className="check-row full">
+          <input
+            type="checkbox"
+            checked={form.createNeed}
+            onChange={(event) => updateForm('createNeed', event.target.checked)}
+          />
+          <span>Зафиксировать потребность клиента</span>
+        </label>
+        {form.createNeed ? (
+          <div className="need-capture-card full">
+            <div className="need-capture-head">
+              <strong>Потребность</strong>
+              <Badge tone={needStageTone[form.needStage]}>{form.needStage}</Badge>
+            </div>
+            <div className="service-request-grid">
+              <SelectField label="Категория" value={form.needCategory} options={customerNeedCategories} onChange={(value) => {
+                setForm((current) => ({
+                  ...current,
+                  needCategory: value,
+                  needTitle: current.needTitle === buildNeedTitle(selectedCounterparty, current.needCategory) ? buildNeedTitle(selectedCounterparty, value) : current.needTitle
+                }));
+              }} />
+              <SelectField label="Стадия" value={form.needStage} options={customerNeedStages} onChange={(value) => updateForm('needStage', value)} />
+              <Field label="Название" value={form.needTitle} onChange={(value) => updateForm('needTitle', value)} className="full" />
+              <Field label="Потенциал, руб./год" value={form.needExpectedEffect} onChange={(value) => updateForm('needExpectedEffect', value.replace(/[^\d]/g, ''))} />
+            </div>
+          </div>
+        ) : null}
         <label className="check-row full">
           <input
             type="checkbox"

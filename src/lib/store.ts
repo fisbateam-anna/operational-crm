@@ -200,6 +200,7 @@ const migrateData = (data: AppData): AppData => {
     ...data,
     users: mergeById(data.users, defaults.users),
     counterparties: normalizeCounterparties(data.counterparties, defaults.counterparties, affectedCounterpartyIds),
+    customerNeeds: mergeById(data.customerNeeds, defaults.customerNeeds),
     taskTemplates: normalizeTaskTemplates(data.taskTemplates, defaults.taskTemplates),
     tasks: normalizeTaskPortfolio(mergedTasks),
     processTemplates: normalizeProcessTemplates(data.processTemplates, defaults.processTemplates),
