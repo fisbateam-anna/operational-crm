@@ -2,9 +2,10 @@ import { cloneDefaultData } from '../data/mock';
 import { DEMO_DATA_RESET_VERSION } from '../data/resetVersion';
 import type { AppData, RoleKey, Task, TaskStatus } from '../types';
 
-const STORAGE_KEY = 'operational-crm-prototype-state-v5';
-const ROLE_KEY = 'operational-crm-prototype-role-v1';
-const RESET_VERSION_KEY = 'operational-crm-prototype-reset-version-v1';
+const STORAGE_KEY = 'operational-crm-state-v5';
+const ROLE_KEY = 'operational-crm-role-v1';
+const AUTH_USER_KEY = 'operational-crm-auth-user-v1';
+const RESET_VERSION_KEY = 'operational-crm-reset-version-v1';
 
 const mergeById = <T extends { id: string }>(current: T[] | undefined, defaults: T[]) => {
   const merged = [...(current ?? [])];
@@ -272,4 +273,16 @@ export const loadRole = (): RoleKey => {
 
 export const saveRole = (role: RoleKey) => {
   localStorage.setItem(ROLE_KEY, role);
+};
+
+export const loadAuthUserId = () => {
+  return localStorage.getItem(AUTH_USER_KEY) ?? '';
+};
+
+export const saveAuthUserId = (userId: string) => {
+  localStorage.setItem(AUTH_USER_KEY, userId);
+};
+
+export const clearAuthUserId = () => {
+  localStorage.removeItem(AUTH_USER_KEY);
 };

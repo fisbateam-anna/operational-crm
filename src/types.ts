@@ -116,6 +116,16 @@ export interface TaskHistoryEntry {
   status?: TaskStatus;
 }
 
+export type TaskLinkRelationType = 'Основание' | 'Блокирует' | 'Зависит от' | 'Порождает' | 'Связанная задача';
+
+export interface TaskRelation {
+  taskId: string;
+  relationType: TaskLinkRelationType;
+  comment?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -133,6 +143,7 @@ export interface Task {
   fieldResults?: Record<string, string>;
   timeSpentHours: number;
   links: string[];
+  taskRelations?: TaskRelation[];
   comments: string[];
   history: TaskHistoryEntry[];
 }
@@ -171,7 +182,7 @@ export interface TaskRequiredRule {
 
 export interface TaskLinkRule {
   id: string;
-  relationType: 'Основание' | 'Блокирует' | 'Зависит от' | 'Порождает' | 'Связанная задача';
+  relationType: TaskLinkRelationType;
   targetType: 'Контрагент' | 'Процесс' | 'Задача' | 'Документ' | 'Коммуникация' | 'Поручение';
   required: boolean;
   description: string;
@@ -426,6 +437,15 @@ export interface BusinessDocument {
 
 export type CommunicationStatus = 'Запланирована' | 'Проведена' | 'Требует follow-up' | 'Отменена';
 
+export type CommunicationRequestCategory =
+  | 'Консультация'
+  | 'Обращение по операции'
+  | 'Срок или статус процесса'
+  | 'Документы или договор'
+  | 'Актуализация данных'
+  | 'Сервисный инцидент'
+  | 'Внутренний запрос';
+
 export interface Communication {
   id: string;
   counterpartyId: string;
@@ -443,6 +463,9 @@ export interface Communication {
   outcome?: string;
   linkedTaskIds?: string[];
   recording?: string;
+  requestCategory?: CommunicationRequestCategory;
+  detectedIntent?: string;
+  routeGroup?: string;
 }
 
 export type InternalHandoffStatus = 'Ожидает' | 'В работе' | 'На проверке' | 'Закрыто' | 'Просрочено';
@@ -450,6 +473,7 @@ export type InternalHandoffStatus = 'Ожидает' | 'В работе' | 'На
 export interface InternalHandoff {
   id: string;
   title: string;
+  requestType?: string;
   sourceDepartment: string;
   targetDepartment: string;
   status: InternalHandoffStatus;

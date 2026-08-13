@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronDown,
+  CircleHelp,
   ClipboardCheck,
   Clock,
   Columns3,
@@ -26,6 +27,7 @@ import {
   Link2,
   ListChecks,
   LockKeyhole,
+  LogOut,
   Mail,
   MessageSquare,
   Network,
@@ -52,7 +54,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { roles } from './data/mock';
-import { loadData, loadRole, resetData, saveData, saveRole } from './lib/store';
+import { clearAuthUserId, loadAuthUserId, loadData, loadRole, resetData, saveAuthUserId, saveData, saveRole } from './lib/store';
 import {
   calculateOperationalRisk,
   calculateProcessProgress,
@@ -79,6 +81,7 @@ import type {
   AuditLog,
   BusinessDocument,
   Communication,
+  CommunicationRequestCategory,
   CommunicationStatus,
   Counterparty,
   CounterpartyStatus,
@@ -147,6 +150,17 @@ type CounterpartySortKey = 'risk' | 'name' | 'touch';
 type FilterLogic = 'AND' | 'OR';
 type CommunicationType = Communication['type'];
 type CommunicationChannel = NonNullable<Communication['channel']>;
+type CommunicationPreset = 'incomingCall' | 'appeal';
+type ExternalCheckTone = 'green' | 'amber' | 'red';
+
+interface ExternalSourceCheck {
+  id: string;
+  label: string;
+  source: string;
+  result: string;
+  detail: string;
+  tone: ExternalCheckTone;
+}
 
 interface CommunicationFormValues {
   counterpartyId: string;
@@ -160,6 +174,10 @@ interface CommunicationFormValues {
   nextAction: string;
   agenda: string;
   participants: string;
+  requestCategory: CommunicationRequestCategory;
+  detectedIntent: string;
+  routeGroup: string;
+  startAppealProcess: boolean;
   createTask: boolean;
   taskGroup: string;
   taskAssigneeId?: string;
@@ -179,6 +197,7 @@ interface CommunicationOutcomePayload {
 
 interface HandoffFormValues {
   title: string;
+  requestType: string;
   sourceDepartment: string;
   targetDepartment: string;
   priority: Priority;
@@ -210,6 +229,29 @@ interface TaskDelegationPayload {
   comment: string;
 }
 
+interface TaskLinkPayload {
+  sourceTaskId: string;
+  targetTaskId: string;
+  relationType: TaskLinkRule['relationType'];
+  comment: string;
+}
+
+interface TaskCommunicationActionPayload {
+  taskId: string;
+  counterpartyId: string;
+  processId?: string;
+  contactId?: string;
+  result: string;
+  nextAction: string;
+}
+
+interface TaskRequisitesActionPayload {
+  taskId: string;
+  counterpartyId: string;
+  fields: Partial<Pick<Counterparty, 'inn' | 'kpp' | 'ogrn' | 'address' | 'identityDocument' | 'loyaltyId' | 'consentStatus' | 'preferredChannel'>>;
+  summary: string;
+}
+
 interface DocumentUploadPayload {
   linkedObjectType: string;
   linkedObjectId: string;
@@ -237,14 +279,15 @@ type ModalState =
   | { type: 'counterpartyForm'; mode: 'create' | 'edit'; id?: string }
   | { type: 'startProcess'; counterpartyId?: string }
   | { type: 'taskForm'; counterpartyId?: string; processId?: string }
-  | { type: 'communication'; counterpartyId?: string }
+  | { type: 'communication'; counterpartyId?: string; preset?: CommunicationPreset }
   | { type: 'communicationOutcome'; id: string }
   | { type: 'contactDetail'; counterpartyId: string; contactId: string }
   | { type: 'controlDate'; counterpartyId: string }
-  | { type: 'documentUpload'; linkedObjectType: string; linkedObjectId: string }
+  | { type: 'documentUpload'; linkedObjectType: string; linkedObjectId: string; returnTaskId?: string }
   | { type: 'internalHandoff'; counterpartyId?: string; processId?: string; taskId?: string }
   | { type: 'taskDetail'; id: string }
   | { type: 'taskDelegate'; id: string }
+  | { type: 'taskLink'; id: string }
   | { type: 'integrationLog'; id: string }
   | { type: 'widgets' }
   | { type: 'import' }
@@ -292,6 +335,73 @@ const filterLogicLabels: Record<FilterLogic, string> = {
 const taskStatuses: TaskStatus[] = ['Новая', 'Назначена', 'В работе', 'Ожидание', 'На проверке', 'Просрочена', 'Выполнена', 'Отменена'];
 const taskFilterStatuses = taskStatuses.filter((status) => status !== 'Просрочена');
 const communicationStatuses: CommunicationStatus[] = ['Запланирована', 'Проведена', 'Требует follow-up', 'Отменена'];
+const communicationRequestCategories: CommunicationRequestCategory[] = [
+  'Консультация',
+  'Обращение по операции',
+  'Срок или статус процесса',
+  'Документы или договор',
+  'Актуализация данных',
+  'Сервисный инцидент',
+  'Внутренний запрос'
+];
+const requestRouteByCategory: Record<CommunicationRequestCategory, string> = {
+  Консультация: 'Центр клиентских коммуникаций',
+  'Обращение по операции': 'Управление операционного сопровождения',
+  'Срок или статус процесса': 'Управление операционного сопровождения',
+  'Документы или договор': 'Юридическое управление',
+  'Актуализация данных': 'Управление операционного сопровождения',
+  'Сервисный инцидент': 'Управление технологической интеграции',
+  'Внутренний запрос': 'Управление операционного сопровождения'
+};
+const requestNextActionByCategory: Record<CommunicationRequestCategory, string> = {
+  Консультация: 'Зафиксировать ответ и закрыть контакт после подтверждения клиента',
+  'Обращение по операции': 'Передать обращение на операционную проверку и контролировать срок ответа',
+  'Срок или статус процесса': 'Проверить текущий этап процесса и сообщить клиенту подтвержденный срок',
+  'Документы или договор': 'Запросить позицию по документам или договорным условиям',
+  'Актуализация данных': 'Запустить проверку профиля и подтверждение данных',
+  'Сервисный инцидент': 'Передать инцидент владельцу сервиса и назначить контроль SLA',
+  'Внутренний запрос': 'Создать поручение подразделению и вернуть результат инициатору'
+};
+const handoffRequestTypes = [
+  'Операционная проверка',
+  'Юридическая позиция',
+  'Технологическая проверка',
+  'Согласование ответа клиенту',
+  'Проверка документов',
+  'Уточнение условий сервиса'
+];
+const handoffDefaults: Record<string, { targetDepartment: string; title: string; comment: string }> = {
+  'Операционная проверка': {
+    targetDepartment: 'Управление операционного сопровождения',
+    title: 'Провести операционную проверку по клиентскому запросу',
+    comment: 'Нужно проверить ситуацию по клиентскому запросу, зафиксировать результат и вернуть комментарий инициатору.'
+  },
+  'Юридическая позиция': {
+    targetDepartment: 'Юридическое управление',
+    title: 'Подготовить юридическую позицию по клиентскому вопросу',
+    comment: 'Нужно оценить договорные условия, ограничения и подготовить позицию для ответа клиенту.'
+  },
+  'Технологическая проверка': {
+    targetDepartment: 'Управление технологической интеграции',
+    title: 'Проверить технологический статус сервиса',
+    comment: 'Нужно проверить журналы обмена, статус сервиса и указать причину отклонения или задержки.'
+  },
+  'Согласование ответа клиенту': {
+    targetDepartment: 'Центр клиентских коммуникаций',
+    title: 'Согласовать итоговый ответ клиенту',
+    comment: 'Нужно проверить формулировку ответа, канал отправки и контрольный срок обратной связи.'
+  },
+  'Проверка документов': {
+    targetDepartment: 'Управление операционного сопровождения',
+    title: 'Проверить комплект документов по клиенту',
+    comment: 'Нужно проверить комплектность документов, связь с процессом и замечания для доработки.'
+  },
+  'Уточнение условий сервиса': {
+    targetDepartment: 'Управление партнерских программ',
+    title: 'Уточнить условия подключенного сервиса',
+    comment: 'Нужно подтвердить параметры сервиса, ответственного владельца и влияние на срок обслуживания.'
+  }
+};
 const internalHandoffStatuses: InternalHandoffStatus[] = ['Ожидает', 'В работе', 'На проверке', 'Закрыто', 'Просрочено'];
 const dashboardTaskStatusOrder: TaskStatus[] = ['В работе', 'На проверке', 'Ожидание', 'Назначена', 'Новая', 'Выполнена', 'Отменена'];
 const dashboardTaskStatusColors: Record<TaskStatus, string> = {
@@ -370,6 +480,13 @@ const roleNav: Record<RoleKey, { page: Page; label: string; icon: LucideIcon }[]
 const cloneState = <T,>(data: T): T => JSON.parse(JSON.stringify(data)) as T;
 
 const normalize = (value: string) => value.toLowerCase().trim();
+const getUserLoginValues = (user: User) => [user.maskedId, user.email, user.id];
+const findAuthenticatedUser = (users: User[], login: string, password: string) => {
+  const normalizedLogin = normalize(login);
+  const normalizedPassword = normalize(password);
+  if (!normalizedLogin || normalizedLogin !== normalizedPassword) return undefined;
+  return users.find((user) => getUserLoginValues(user).some((value) => normalize(value) === normalizedLogin));
+};
 const formatHoursInput = (value: number) => {
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace('.', ',');
@@ -403,6 +520,108 @@ const calculateProcessFactHours = (process: ProcessInstance, data: AppData) => {
   return Math.round(total * 10) / 10;
 };
 const isIndividualCounterparty = (item?: Counterparty) => item?.partyKind === 'ФЛ' || item?.type === 'ФЛ';
+const getDefaultRequestCategory = (counterparty?: Counterparty, preset?: CommunicationPreset): CommunicationRequestCategory => {
+  if (preset === 'appeal') return isIndividualCounterparty(counterparty) ? 'Обращение по операции' : 'Срок или статус процесса';
+  if (preset === 'incomingCall') return isIndividualCounterparty(counterparty) ? 'Обращение по операции' : 'Срок или статус процесса';
+  return 'Консультация';
+};
+const getRequestRouteGroup = (category: CommunicationRequestCategory, counterparty?: Counterparty) => {
+  if (category === 'Сервисный инцидент' && counterparty?.services[0]?.ownerDepartment) return counterparty.services[0].ownerDepartment;
+  return requestRouteByCategory[category];
+};
+const buildDetectedIntent = (counterparty?: Counterparty, category: CommunicationRequestCategory = 'Консультация') => {
+  const name = counterparty?.shortName ?? 'клиент';
+  if (category === 'Обращение по операции') return `${name} сообщает о спорной операции и просит проверить статус обработки.`;
+  if (category === 'Срок или статус процесса') return `${name} просит подтвердить текущий этап, срок и ответственного по открытому процессу.`;
+  if (category === 'Документы или договор') return `${name} уточняет статус документов или договорных условий обслуживания.`;
+  if (category === 'Актуализация данных') return `${name} просит изменить или подтвердить данные профиля.`;
+  if (category === 'Сервисный инцидент') return `${name} сообщает о сбое подключенного сервиса и ожидает срок восстановления.`;
+  if (category === 'Внутренний запрос') return `Нужно запросить позицию внутреннего подразделения по обращению ${name}.`;
+  return `${name} обратился за консультацией по обслуживанию.`;
+};
+const getNextSequentialId = (prefix: string, ids: string[], floor: number, pad = 4) => {
+  const maxNumber = Math.max(
+    floor,
+    ...ids
+      .map((id) => Number(id.match(/(\d+)$/)?.[1] ?? ''))
+      .filter((value) => Number.isFinite(value))
+  );
+  return `${prefix}${String(maxNumber + 1).padStart(pad, '0')}`;
+};
+const buildExternalSourceChecks = (counterparty: Counterparty, risk: number): ExternalSourceCheck[] => {
+  const isIndividual = isIndividualCounterparty(counterparty);
+  if (isIndividual) {
+    return [
+      {
+        id: 'identity',
+        label: 'Идентификация',
+        source: 'РФ/РК: реестр документов',
+        result: counterparty.identityDocument ? 'Подтверждено' : 'Нужны данные',
+        detail: counterparty.identityDocument ? counterparty.identityDocument : 'Документ не заполнен в карточке',
+        tone: counterparty.identityDocument ? 'green' : 'amber'
+      },
+      {
+        id: 'tax-id',
+        label: 'ИНН/ИИН',
+        source: 'РФ: ФНС / РК: КГД',
+        result: counterparty.inn ? 'Формат проверен' : 'Не заполнено',
+        detail: counterparty.inn || 'Нужно указать налоговый идентификатор',
+        tone: counterparty.inn ? 'green' : 'amber'
+      },
+      {
+        id: 'restrictions',
+        label: 'Ограничения',
+        source: 'РФ: ФССП / РК: исполнительные документы',
+        result: counterparty.penalties ? 'Есть сигнал' : 'Не выявлено',
+        detail: counterparty.penalties ? `${counterparty.penalties} активн. событ.` : 'Совпадений по ограничениям нет',
+        tone: counterparty.penalties ? 'amber' : 'green'
+      },
+      {
+        id: 'consent',
+        label: 'ПДн и согласия',
+        source: 'CRM + реестр согласий',
+        result: counterparty.consentStatus === 'Получено' ? 'Актуально' : counterparty.consentStatus === 'Истекает' ? 'Истекает' : 'Требует запроса',
+        detail: counterparty.consentStatus ? `Статус: ${counterparty.consentStatus}` : 'Согласие не зафиксировано',
+        tone: counterparty.consentStatus === 'Получено' ? 'green' : counterparty.consentStatus === 'Истекает' ? 'amber' : 'red'
+      }
+    ];
+  }
+
+  return [
+    {
+      id: 'registry',
+      label: 'Регистрация ЮЛ/ИП',
+      source: 'РФ: ЕГРЮЛ/ЕГРИП / РК: госреестр БИН',
+      result: counterparty.inn && counterparty.ogrn ? 'Подтверждено' : 'Нужны данные',
+      detail: counterparty.ogrn ? `Рег. номер: ${counterparty.ogrn}` : 'ОГРН/БИН не заполнен',
+      tone: counterparty.inn && counterparty.ogrn ? 'green' : 'amber'
+    },
+    {
+      id: 'tax-status',
+      label: 'Налоговый статус',
+      source: 'РФ: ФНС / РК: КГД',
+      result: counterparty.status === 'Архив' ? 'Неактивен' : risk >= 80 ? 'Проверить' : 'Актуально',
+      detail: counterparty.status === 'Архив' ? 'Карточка в архиве' : `ИНН/БИН: ${counterparty.inn}`,
+      tone: counterparty.status === 'Архив' ? 'amber' : risk >= 80 ? 'amber' : 'green'
+    },
+    {
+      id: 'encumbrances',
+      label: 'Ограничения',
+      source: 'РФ: ФССП / РК: реестр ограничений',
+      result: counterparty.penalties ? 'Есть события' : 'Не выявлено',
+      detail: counterparty.penalties ? `${counterparty.penalties} предпис./штраф.` : 'Ограничений по карточке нет',
+      tone: counterparty.penalties ? 'amber' : 'green'
+    },
+    {
+      id: 'compliance',
+      label: 'Комплаенс-листы',
+      source: 'Универсальный комплаенс-контур',
+      result: risk >= 80 ? 'Ручная проверка' : 'Совпадений нет',
+      detail: risk >= 80 ? `Операционный риск ${risk}` : 'Критичных совпадений не найдено',
+      tone: risk >= 80 ? 'red' : risk >= 60 ? 'amber' : 'green'
+    }
+  ];
+};
 type ProcessPartyKind = Exclude<PartyKindFilter, 'Все'>;
 const getProcessTemplatePartyKinds = (template: ProcessTemplate): ProcessPartyKind[] => {
   if (template.partyKinds?.length) return template.partyKinds;
@@ -419,7 +638,7 @@ const canStartProcessForCounterparty = (template: ProcessTemplate, counterparty?
 const getNextStageByTemplate = (template: ProcessTemplate, stageIndex: number) => {
   const currentStage = template.stages[stageIndex];
   if (!currentStage) return { stage: undefined, index: -1, transition: undefined as ProcessTransition | undefined };
-  if (Array.isArray(template.transitions)) {
+  if (Array.isArray(template.transitions) && template.transitions.length > 0) {
     const explicitTransition = template.transitions.find((transition) => transition.fromStageId === currentStage.id && transition.createsTask);
     const explicitIndex = explicitTransition ? template.stages.findIndex((stage) => stage.id === explicitTransition.toStageId) : -1;
     if (explicitTransition && explicitIndex >= 0) return { stage: template.stages[explicitIndex], index: explicitIndex, transition: explicitTransition };
@@ -454,7 +673,7 @@ const buildDefaultNotificationTemplate = (id: string): NotificationTemplate => (
   trigger: 'Запуск процесса',
   channel: 'Внутрисистемное',
   recipientRule: 'Группа текущего этапа',
-  recipientFallback: 'Операционный контроль',
+  recipientFallback: 'Управление операционного сопровождения',
   subject: 'Событие по {counterparty}',
   body: 'Процесс {processId}, задача {taskId}, срок {dueDate}. Ответственная группа: {assigneeGroup}.',
   variables: notificationVariableOptions,
@@ -576,6 +795,13 @@ const taskTemplateStatusOptions: TaskStatus[] = ['Новая', 'Назначен
 const taskAutoTriggerOptions: NonNullable<TaskTemplate['autoCreateTriggers']>[number][] = ['Запуск процесса', 'Переход этапа', 'Follow-up коммуникации', 'Контрольная дата', 'Внутреннее поручение', 'API'];
 const taskLinkRelationOptions: TaskLinkRule['relationType'][] = ['Основание', 'Блокирует', 'Зависит от', 'Порождает', 'Связанная задача'];
 const taskLinkTargetOptions: TaskLinkRule['targetType'][] = ['Контрагент', 'Процесс', 'Задача', 'Документ', 'Коммуникация', 'Поручение'];
+const getInverseTaskRelationType = (relationType: TaskLinkRule['relationType']): TaskLinkRule['relationType'] => {
+  if (relationType === 'Порождает') return 'Основание';
+  if (relationType === 'Основание') return 'Порождает';
+  if (relationType === 'Блокирует') return 'Зависит от';
+  if (relationType === 'Зависит от') return 'Блокирует';
+  return relationType;
+};
 const taskTemplateRoleOptions: TaskRequiredRule['role'][] = ['Любая роль', 'curator', 'department', 'owner', 'admin'];
 const taskTemplateAttributes = (template: TaskTemplate): TaskTemplateAttribute[] =>
   template.attributes?.length
@@ -642,7 +868,7 @@ const buildDefaultTaskTemplate = (id: string): TaskTemplate => ({
   name: 'Новый шаблон задачи',
   entityType: 'Операционная задача',
   defaultPriority: 'Средний',
-  assigneeGroup: 'Операционный контроль',
+  assigneeGroup: 'Управление операционного сопровождения',
   requiredFields: ['Основание', 'Результат', 'Комментарий'],
   slaHours: 8,
   statusModel: ['Новая', 'Назначена', 'В работе', 'На проверке', 'Выполнена'],
@@ -916,7 +1142,7 @@ const manualTaskTypeOptions = [
     label: 'Контрольная проверка',
     partyKinds: ['ФЛ', 'ЮЛ'] as ProcessPartyKind[],
     defaultPriority: 'Высокий' as Priority,
-    defaultGroup: 'Операционный контроль',
+    defaultGroup: 'Управление операционного сопровождения',
     title: (subject: string) => `Контрольная проверка: ${subject}`,
     requiredFields: ['Проверен профиль контрагента', 'Проверены активные задачи и процессы', 'Зафиксирован результат контроля'],
     preview: 'Рабочий лист для планового или внепланового контроля карточки.'
@@ -926,7 +1152,7 @@ const manualTaskTypeOptions = [
     label: 'Запрос данных/документов',
     partyKinds: ['ФЛ', 'ЮЛ'] as ProcessPartyKind[],
     defaultPriority: 'Средний' as Priority,
-    defaultGroup: 'Операционный контроль',
+    defaultGroup: 'Управление операционного сопровождения',
     title: (subject: string) => `Запросить данные: ${subject}`,
     requiredFields: ['Сформулирован запрос', 'Указан адресат и срок ответа', 'Зафиксирован результат получения данных'],
     preview: 'Универсальная задача для запроса сведений у клиента, контрагента или внутренней группы.'
@@ -936,7 +1162,7 @@ const manualTaskTypeOptions = [
     label: 'Проверка документа',
     partyKinds: ['ФЛ', 'ЮЛ'] as ProcessPartyKind[],
     defaultPriority: 'Средний' as Priority,
-    defaultGroup: 'Юридическое сопровождение',
+    defaultGroup: 'Юридическое управление',
     title: (subject: string) => `Проверить документ: ${subject}`,
     requiredFields: ['Проверено назначение документа', 'Проверены реквизиты и связь с объектом', 'Принято решение по документу'],
     preview: 'Задача для проверки файла, договорной карточки, ЭВД или рабочего материала.'
@@ -946,7 +1172,7 @@ const manualTaskTypeOptions = [
     label: 'Сервисный инцидент',
     partyKinds: ['ФЛ', 'ЮЛ'] as ProcessPartyKind[],
     defaultPriority: 'Высокий' as Priority,
-    defaultGroup: 'Технологическая интеграция',
+    defaultGroup: 'Управление технологической интеграции',
     title: (subject: string) => `Разобрать сервисный инцидент: ${subject}`,
     requiredFields: ['Определен затронутый сервис', 'Зафиксирована причина и влияние', 'Назначен план восстановления или обходное решение'],
     preview: 'Рабочий лист для инцидента по подключенному продукту или сервису.'
@@ -956,7 +1182,7 @@ const manualTaskTypeOptions = [
     label: 'Обращение клиента',
     partyKinds: ['ФЛ', 'ЮЛ'] as ProcessPartyKind[],
     defaultPriority: 'Высокий' as Priority,
-    defaultGroup: 'Контактный центр',
+    defaultGroup: 'Центр клиентских коммуникаций',
     title: (subject: string) => `Зарегистрировать обращение: ${subject}`,
     requiredFields: ['Суть обращения', 'Тип обращения', 'Канал обращения', 'Контакт/заявитель', 'Способ решения', 'Решение', 'Срок ответа клиенту'],
     preview: 'Регистрация и первичная обработка входящего обращения ФЛ или ЮЛ без отдельного процесса.'
@@ -966,7 +1192,7 @@ const manualTaskTypeOptions = [
     label: 'Follow-up по коммуникации',
     partyKinds: ['ФЛ', 'ЮЛ'] as ProcessPartyKind[],
     defaultPriority: 'Средний' as Priority,
-    defaultGroup: 'Операционный контроль',
+    defaultGroup: 'Управление операционного сопровождения',
     title: (subject: string) => `Follow-up: ${subject}`,
     requiredFields: ['Итог коммуникации', 'Следующий шаг', 'Ответственный'],
     preview: 'Задача по договоренности после звонка, встречи, письма или обращения.'
@@ -976,7 +1202,7 @@ const manualTaskTypeOptions = [
     label: 'Свободная задача',
     partyKinds: ['ФЛ', 'ЮЛ'] as ProcessPartyKind[],
     defaultPriority: 'Средний' as Priority,
-    defaultGroup: 'Операционный контроль',
+    defaultGroup: 'Управление операционного сопровождения',
     title: (subject: string) => `Рабочая задача: ${subject}`,
     requiredFields: ['Описание результата', 'Основание выполнения', 'Следующее действие'],
     preview: 'Максимально универсальная карточка, если задача не привязана к процессу.'
@@ -1087,6 +1313,7 @@ const addDaysIsoDate = (value: string, days: number) => {
 
 function App() {
   const [data, setData] = useState<AppData>(() => loadData());
+  const [authUserId, setAuthUserId] = useState(() => loadAuthUserId());
   const [role, setRole] = useState<RoleKey>(() => loadRole());
   const [route, setRoute] = useState<RouteState>({ page: 'dashboard' });
   const [modal, setModal] = useState<ModalState>(null);
@@ -1097,13 +1324,52 @@ function App() {
   useEffect(() => saveData(data), [data]);
   useEffect(() => saveRole(role), [role]);
 
+  const authenticatedUser = data.users.find((user) => user.id === authUserId);
   const currentRole = roles.find((item) => item.key === role) ?? roles[0];
-  const currentUser = data.users.find((user) => user.id === currentRole.userId) ?? data.users[0];
+  const currentUser = authenticatedUser ?? data.users[0];
+  const availableRoles = authenticatedUser?.role === 'admin' ? roles : roles.filter((item) => item.key !== 'admin');
+
+  useEffect(() => {
+    if (!authUserId || authenticatedUser) return;
+    clearAuthUserId();
+    setAuthUserId('');
+  }, [authUserId, authenticatedUser?.id]);
+
+  useEffect(() => {
+    if (!authenticatedUser || authenticatedUser.role === 'admin' || role !== 'admin') return;
+
+    setRole(authenticatedUser.role);
+    saveRole(authenticatedUser.role);
+    setRoute(authenticatedUser.role === 'department' ? { page: 'tasks' } : { page: 'dashboard' });
+  }, [authenticatedUser?.id, authenticatedUser?.role, role]);
 
   const notify = (message: string, tone: ToastTone = 'success') => {
     const id = Date.now();
     setToasts((current) => [...current, { id, message, tone }]);
     window.setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 4200);
+  };
+
+  const signIn = (login: string, password: string) => {
+    const user = findAuthenticatedUser(data.users, login, password);
+    if (!user) return false;
+
+    setAuthUserId(user.id);
+    saveAuthUserId(user.id);
+    setRole(user.role);
+    saveRole(user.role);
+    setRoute(user.role === 'department' ? { page: 'tasks' } : { page: 'dashboard' });
+    setModal(null);
+    setGlobalQuery('');
+    notify(`Вход выполнен: ${user.name}`, 'success');
+    return true;
+  };
+
+  const signOut = () => {
+    clearAuthUserId();
+    setAuthUserId('');
+    setModal(null);
+    setGlobalQuery('');
+    setRoute({ page: 'dashboard' });
   };
 
   const mutate = (updater: (draft: AppData) => void) => {
@@ -1167,7 +1433,7 @@ function App() {
       priority: overdueDays ? 'Критичный' : 'Высокий',
       counterpartyId: counterparty.id,
       assigneeId: counterparty.curatorId,
-      assigneeGroup: 'Операционный контроль',
+      assigneeGroup: 'Управление операционного сопровождения',
       dueDate: counterparty.nextControlDate,
       createdAt: '2026-08-04T12:05:00+07:00',
       requiredFields: ['Проверен профиль контрагента', 'Проверены активные процессы и задачи', 'Зафиксирован результат контроля'],
@@ -1197,13 +1463,13 @@ function App() {
       processTemplate: controlTemplate,
       triggerKind: 'Контрольная дата',
       fallbackTrigger: 'Наступление контрольной даты',
-      fallbackRecipient: assignee?.name ?? 'Операционный контроль',
+      fallbackRecipient: assignee?.name ?? 'Управление операционного сопровождения',
       objectId: taskId,
       at: '2026-08-04T12:05:01+07:00',
       context: {
         counterparty,
         taskId,
-        assigneeGroup: assignee?.department ?? 'Операционный контроль',
+        assigneeGroup: assignee?.department ?? 'Управление операционного сопровождения',
         currentUser,
         dueDate: counterparty.nextControlDate,
         controlDate: counterparty.nextControlDate
@@ -1238,10 +1504,16 @@ function App() {
   };
 
   const switchRole = (nextRole: RoleKey) => {
+    if (nextRole === 'admin' && authenticatedUser?.role !== 'admin') {
+      notify('Роль администратора доступна только через отдельный вход', 'warning');
+      return;
+    }
+
+    const roleDefinition = roles.find((item) => item.key === nextRole);
     setRole(nextRole);
     const startPage: RouteState = nextRole === 'department' ? { page: 'tasks' } : { page: 'dashboard' };
     setRoute(startPage);
-    notify(`Роль переключена: ${roles.find((item) => item.key === nextRole)?.label}`, 'info');
+    notify(`Роль переключена: ${roleDefinition?.label ?? nextRole}`, 'info');
   };
 
   const runGlobalSearch = () => {
@@ -1280,6 +1552,8 @@ function App() {
   const restoreInitialDemoState = (message = 'Демо-данные восстановлены') => {
     const restored = resetData();
     setData(restored);
+    clearAuthUserId();
+    setAuthUserId('');
     setRole('curator');
     saveRole('curator');
     setRoute({ page: 'dashboard' });
@@ -1302,7 +1576,7 @@ function App() {
     return () => window.removeEventListener('hashchange', resetFromServiceHash);
   }, []);
 
-  const resetPrototype = () => {
+  const resetDemoData = () => {
     restoreInitialDemoState();
   };
 
@@ -1310,35 +1584,26 @@ function App() {
     mutate((draft) => {
       const counterparty = draft.counterparties.find((item) => item.id === 'КО-000219');
       if (!counterparty) return;
-      draft.communications.unshift({
-        id: `COM-${700 + draft.communications.length + 1}`,
-        counterpartyId: counterparty.id,
-        type: 'Звонок',
-        subject: 'Входящий звонок распознан телефонией',
-        at: '2026-08-04T12:08:00+07:00',
-        responsibleId: currentUser.id,
-        summary: 'Система сопоставила номер с основным контактом ВКЦ и открыла единый профиль контрагента.',
-        nextAction: 'Зафиксировать итог звонка и связать его с процессом BP-2026-0152',
-        recording: 'call-20260804-1208.mp3'
-      });
       draft.integrations.unshift({
-        id: `INT-${600 + draft.integrations.length}`,
+        id: getNextSequentialId('INT-', draft.integrations.map((item) => item.id), 600, 3),
         system: 'Телефония',
         status: 'Успешно',
         lastSync: '2026-08-04T12:08:00+07:00',
         objectType: 'Контрагент',
         objectId: counterparty.id,
-        operation: 'Сопоставление входящего звонка с карточкой',
+        operation: 'Сопоставление входящего звонка с карточкой и подготовка маршрута',
         records: 1,
         errors: [],
         log: [
-          { at: '2026-08-04T12:08:00+07:00', level: 'INFO', message: 'Номер +7 423 240-09-18 сопоставлен с контактом Ольга Шестакова' }
+          { at: '2026-08-04T12:08:00+07:00', level: 'INFO', message: 'Номер +7 423 240-09-18 сопоставлен с контактом Ольга Шестакова' },
+          { at: '2026-08-04T12:08:01+07:00', level: 'INFO', message: 'Предложен маршрут: Управление операционного сопровождения' }
         ]
       });
       addAudit(draft, 'Автоматическое открытие карточки по звонку', 'Контрагент', counterparty.id, 'Успешно', 'Межсистемное взаимодействие');
     });
-    navigate({ page: 'counterparty', id: 'КО-000219', tab: 'communications' });
-    notify('Телефония распознала входящий звонок и открыла карточку ВКЦ', 'info');
+    navigate({ page: 'counterparty', id: 'КО-000219', tab: 'profile' });
+    setModal({ type: 'communication', counterpartyId: 'КО-000219', preset: 'incomingCall' });
+    notify('Телефония распознала входящий звонок и подготовила карточку обслуживания', 'info');
   };
 
   const createCounterparty = (form: Partial<Counterparty>) => {
@@ -1367,7 +1632,7 @@ function App() {
         penalties: 0,
         services: [],
         contacts: partyKind === 'ФЛ' && form.contacts?.[0] ? form.contacts : [],
-        departments: partyKind === 'ФЛ' ? ['Контактный центр'] : ['Операционный контроль'],
+        departments: partyKind === 'ФЛ' ? ['Центр клиентских коммуникаций'] : ['Управление операционного сопровождения'],
         birthDate: form.birthDate,
         identityDocument: form.identityDocument,
         loyaltyId: form.loyaltyId,
@@ -1437,7 +1702,7 @@ function App() {
         dueDate,
         initiatorId: currentUser.id,
         ownerDepartment: template.stages[0]?.department ?? 'Офис управления процессами',
-        currentGroup: template.stages[0]?.department ?? 'Операционный контроль',
+        currentGroup: template.stages[0]?.department ?? 'Управление операционного сопровождения',
         priority: taskTemplate?.defaultPriority ?? 'Средний',
         elapsedHours: 0,
         businessObjectId: `${businessObjectPrefix}-${processId.slice(-4)}`,
@@ -1805,6 +2070,94 @@ function App() {
     notify(`Задача ${payload.taskId} назначена: ${assigneeLabel}`, 'info');
   };
 
+  const openTaskLinkModal = (taskId: string) => {
+    setModal({ type: 'taskLink', id: taskId });
+  };
+
+  const linkTasks = (payload: TaskLinkPayload) => {
+    if (payload.sourceTaskId === payload.targetTaskId) {
+      notify('Нельзя связать задачу саму с собой', 'warning');
+      return;
+    }
+
+    let targetTitle = payload.targetTaskId;
+    mutate((draft) => {
+      const sourceTask = draft.tasks.find((item) => item.id === payload.sourceTaskId);
+      const targetTask = draft.tasks.find((item) => item.id === payload.targetTaskId);
+      if (!sourceTask || !targetTask) return;
+      targetTitle = targetTask.title;
+      if (!sourceTask.links.includes(targetTask.id)) sourceTask.links.push(targetTask.id);
+      if (!targetTask.links.includes(sourceTask.id)) targetTask.links.push(sourceTask.id);
+      sourceTask.taskRelations = [
+        ...(sourceTask.taskRelations ?? []).filter((relation) => relation.taskId !== targetTask.id),
+        {
+          taskId: targetTask.id,
+          relationType: payload.relationType,
+          comment: payload.comment,
+          createdAt: '2026-08-05T10:45:00+07:00',
+          createdBy: currentUser.id
+        }
+      ];
+      targetTask.taskRelations = [
+        ...(targetTask.taskRelations ?? []).filter((relation) => relation.taskId !== sourceTask.id),
+        {
+          taskId: sourceTask.id,
+          relationType: getInverseTaskRelationType(payload.relationType),
+          comment: payload.comment,
+          createdAt: '2026-08-05T10:45:00+07:00',
+          createdBy: currentUser.id
+        }
+      ];
+      const details = `${payload.relationType}: ${targetTask.id} - ${targetTask.title}${payload.comment ? `. ${payload.comment}` : ''}`;
+      const reverseDetails = `${getInverseTaskRelationType(payload.relationType)}: ${sourceTask.id} - ${sourceTask.title}${payload.comment ? `. ${payload.comment}` : ''}`;
+      sourceTask.history.unshift({
+        at: '2026-08-05T10:45:00+07:00',
+        actorId: currentUser.id,
+        action: 'Связана задача',
+        details,
+        status: sourceTask.status
+      });
+      targetTask.history.unshift({
+        at: '2026-08-05T10:45:00+07:00',
+        actorId: currentUser.id,
+        action: 'Связана задача',
+        details: reverseDetails,
+        status: targetTask.status
+      });
+      addAudit(draft, 'Связывание задач', 'Задача', `${payload.sourceTaskId} -> ${payload.targetTaskId}`);
+    });
+    setModal({ type: 'taskDetail', id: payload.sourceTaskId });
+    notify(`Связь с задачей ${payload.targetTaskId} сохранена: ${targetTitle}`, 'success');
+  };
+
+  const unlinkTasks = (sourceTaskId: string, targetTaskId: string) => {
+    mutate((draft) => {
+      const sourceTask = draft.tasks.find((item) => item.id === sourceTaskId);
+      const targetTask = draft.tasks.find((item) => item.id === targetTaskId);
+      if (!sourceTask || !targetTask) return;
+      sourceTask.links = sourceTask.links.filter((link) => link !== targetTaskId);
+      targetTask.links = targetTask.links.filter((link) => link !== sourceTaskId);
+      sourceTask.taskRelations = (sourceTask.taskRelations ?? []).filter((relation) => relation.taskId !== targetTaskId);
+      targetTask.taskRelations = (targetTask.taskRelations ?? []).filter((relation) => relation.taskId !== sourceTaskId);
+      sourceTask.history.unshift({
+        at: '2026-08-05T10:50:00+07:00',
+        actorId: currentUser.id,
+        action: 'Связь задач снята',
+        details: `Связь с ${targetTask.id} - ${targetTask.title} удалена`,
+        status: sourceTask.status
+      });
+      targetTask.history.unshift({
+        at: '2026-08-05T10:50:00+07:00',
+        actorId: currentUser.id,
+        action: 'Связь задач снята',
+        details: `Связь с ${sourceTask.id} - ${sourceTask.title} удалена`,
+        status: targetTask.status
+      });
+      addAudit(draft, 'Удаление связи задач', 'Задача', `${sourceTaskId} - ${targetTaskId}`);
+    });
+    notify(`Связь задач ${sourceTaskId} и ${targetTaskId} снята`, 'info');
+  };
+
   const undoTask = (taskId: string) => {
     mutate((draft) => {
       const task = draft.tasks.find((item) => item.id === taskId);
@@ -1886,12 +2239,142 @@ function App() {
     notify(`Задача ${id} создана`, 'success');
   };
 
-  const addCommunication = (payload: CommunicationFormValues) => {
-    const communicationId = `COM-${820 + data.communications.length}`;
-    const taskId = payload.createTask ? `TASK-${2180 + data.tasks.length}` : undefined;
+  const saveTaskCommunicationAction = (payload: TaskCommunicationActionPayload) => {
+    const communicationId = `COM-${850 + data.communications.length}`;
     mutate((draft) => {
+      const task = draft.tasks.find((item) => item.id === payload.taskId);
       const counterparty = draft.counterparties.find((item) => item.id === payload.counterpartyId);
       const process = payload.processId ? draft.processes.find((item) => item.id === payload.processId) : undefined;
+      const contact = counterparty?.contacts.find((item) => item.id === payload.contactId);
+      draft.communications.unshift({
+        id: communicationId,
+        counterpartyId: payload.counterpartyId,
+        type: 'Звонок',
+        subject: task ? `Звонок по задаче ${task.id}` : 'Звонок по задаче CRM',
+        at: '2026-08-05T12:55:00+07:00',
+        responsibleId: currentUser.id,
+        summary: payload.result,
+        nextAction: payload.nextAction,
+        status: payload.nextAction ? 'Требует follow-up' : 'Проведена',
+        channel: 'Телефон',
+        processId: payload.processId,
+        agenda: task ? [`Контекст задачи ${task.id}`, 'Уточнить рабочий результат', 'Зафиксировать следующий шаг'] : ['Уточнить рабочий результат'],
+        participants: [contact?.name, currentUser.name].filter(Boolean) as string[],
+        outcome: payload.result,
+        linkedTaskIds: [payload.taskId]
+      });
+      if (counterparty) counterparty.lastTouch = '2026-08-05T12:55:00+07:00';
+      if (task) {
+        const matchedFields = task.requiredFields.filter((field) => {
+          const normalized = normalize(field);
+          return normalized.includes('коммуникац') || normalized.includes('контакт') || normalized.includes('заявител') || normalized.includes('канал') || normalized.includes('следующий шаг');
+        });
+        task.fieldResults = {
+          ...(task.fieldResults ?? {}),
+          ...Object.fromEntries(matchedFields.map((field) => [field, field.toLowerCase().includes('следующий') ? payload.nextAction : payload.result]))
+        };
+        task.completedFields = Array.from(new Set([...task.completedFields, ...matchedFields]));
+        if (!task.links.includes(communicationId)) task.links.push(communicationId);
+        task.comments.unshift(`Звонок: ${payload.result}${payload.nextAction ? `. Следующий шаг: ${payload.nextAction}` : ''}`);
+        task.history.unshift({
+          at: '2026-08-05T12:55:00+07:00',
+          actorId: currentUser.id,
+          action: 'Зафиксирован звонок из задачи',
+          details: `${contact?.name ?? counterparty?.shortName ?? payload.counterpartyId}: ${payload.result}`,
+          status: task.status
+        });
+      }
+      process?.history.unshift({
+        at: '2026-08-05T12:55:00+07:00',
+        actorId: currentUser.id,
+        action: 'Зафиксирована коммуникация из задачи',
+        details: `${communicationId}: ${payload.result}`,
+        status: process.status === 'Завершен' ? 'Выполнена' : 'В работе'
+      });
+      addAudit(draft, 'Фиксация звонка из задачи', 'Коммуникация', communicationId);
+    });
+    notify(`Звонок сохранен и связан с задачей ${payload.taskId}`, 'success');
+  };
+
+  const saveTaskRequisitesAction = (payload: TaskRequisitesActionPayload) => {
+    mutate((draft) => {
+      const task = draft.tasks.find((item) => item.id === payload.taskId);
+      const counterparty = draft.counterparties.find((item) => item.id === payload.counterpartyId);
+      if (!task || !counterparty) return;
+      Object.assign(counterparty, payload.fields);
+      const matchedFields = task.requiredFields.filter((field) => {
+        const normalized = normalize(field);
+        return normalized.includes('реквиз') || normalized.includes('документ') || normalized.includes('профил') || normalized.includes('адрес') || normalized.includes('соглас');
+      });
+      task.fieldResults = {
+        ...(task.fieldResults ?? {}),
+        ...Object.fromEntries(matchedFields.map((field) => [field, payload.summary]))
+      };
+      task.completedFields = Array.from(new Set([...task.completedFields, ...matchedFields]));
+      task.comments.unshift(`Обновлены данные карточки: ${payload.summary}`);
+      task.history.unshift({
+        at: '2026-08-05T13:05:00+07:00',
+        actorId: currentUser.id,
+        action: 'Обновлены реквизиты из задачи',
+        details: payload.summary,
+        status: task.status
+      });
+      addAudit(draft, 'Обновление реквизитов из задачи', 'Контрагент', payload.counterpartyId);
+    });
+    notify(`Данные карточки обновлены из задачи ${payload.taskId}`, 'success');
+  };
+
+  const addCommunication = (payload: CommunicationFormValues) => {
+    const startsAppealProcess = payload.type === 'Обращение' && payload.startAppealProcess;
+    const communicationId = getNextSequentialId('COM-', data.communications.map((item) => item.id), 820, 3);
+    const taskId = payload.createTask || startsAppealProcess ? getNextSequentialId('TASK-', data.tasks.map((item) => item.id), 2180, 4) : undefined;
+    const processId = startsAppealProcess ? getNextSequentialId('BP-2026-', data.processes.map((item) => item.id), 170, 4) : payload.processId || undefined;
+    const integrationId = getNextSequentialId('INT-', data.integrations.map((item) => item.id), 620, 3);
+    const createdProcessId = startsAppealProcess ? processId : '';
+    const createdTaskId = taskId ?? '';
+
+    mutate((draft) => {
+      const counterparty = draft.counterparties.find((item) => item.id === payload.counterpartyId);
+      const appealTemplate = draft.processTemplates.find((item) => item.id === 'pt-client-appeal');
+      const appealStage = appealTemplate?.stages[0];
+      const appealTaskTemplate = draft.taskTemplates.find((item) => item.id === appealStage?.autoTaskTemplateId);
+      let process = processId ? draft.processes.find((item) => item.id === processId) : undefined;
+      const routeGroup = payload.routeGroup || getRequestRouteGroup(payload.requestCategory, counterparty);
+
+      if (startsAppealProcess && appealTemplate && appealStage && appealTaskTemplate && taskId && processId) {
+        const appealProcess: ProcessInstance = {
+          id: processId,
+          templateId: appealTemplate.id,
+          title: `Обработка обращения: ${counterparty?.shortName ?? payload.subject}`,
+          type: appealTemplate.processType ?? 'Клиентское обращение',
+          status: 'Запущен',
+          counterpartyId: payload.counterpartyId,
+          stageIndex: 0,
+          startedAt: payload.at,
+          dueDate: payload.taskDueDate,
+          initiatorId: currentUser.id,
+          ownerDepartment: appealStage.department,
+          currentGroup: appealStage.department,
+          priority: appealTaskTemplate.defaultPriority,
+          elapsedHours: 0,
+          businessObjectId: `ОБР-${processId.slice(-4)}`,
+          taskIds: [taskId],
+          documentIds: [],
+          integrationIds: [integrationId],
+          history: [
+            {
+              at: payload.at,
+              actorId: currentUser.id,
+              action: 'Автозапуск по входящему обращению',
+              details: `${payload.requestCategory}: ${payload.detectedIntent}`,
+              status: 'Новая'
+            }
+          ]
+        };
+        process = appealProcess;
+        draft.processes.unshift(appealProcess);
+      }
+
       draft.communications.unshift({
         id: communicationId,
         counterpartyId: payload.counterpartyId,
@@ -1903,66 +2386,121 @@ function App() {
         nextAction: payload.nextAction,
         status: payload.status,
         channel: payload.channel,
-        processId: payload.processId || undefined,
+        processId: process?.id,
         agenda: payload.agenda.split('\n').map((item) => item.trim()).filter(Boolean),
         participants: payload.participants.split(',').map((item) => item.trim()).filter(Boolean),
         outcome: payload.status === 'Запланирована' ? undefined : payload.summary,
-        linkedTaskIds: taskId ? [taskId] : undefined
+        linkedTaskIds: taskId ? [taskId] : undefined,
+        recording: payload.channel === 'Телефон' ? `call-${payload.at.slice(0, 16).replace(/\D/g, '')}.mp3` : undefined,
+        requestCategory: payload.requestCategory,
+        detectedIntent: payload.detectedIntent,
+        routeGroup
       });
-      if (counterparty) counterparty.lastTouch = payload.at;
-      if (process) {
-        process.history.unshift({
-          at: payload.at,
-          actorId: currentUser.id,
-          action: payload.status === 'Запланирована' ? 'Запланирована коммуникация' : 'Зафиксирована коммуникация',
-          details: `${payload.type}: ${payload.subject}`,
-          status: process.status === 'Завершен' ? 'Выполнена' : 'В работе'
-        });
+
+      if (counterparty) {
+        counterparty.lastTouch = payload.at;
+        if (payload.type === 'Обращение') counterparty.officialRequests += 1;
       }
+
+      process?.history.unshift({
+        at: payload.at,
+        actorId: currentUser.id,
+        action: payload.status === 'Запланирована' ? 'Запланирована коммуникация' : 'Зафиксирована коммуникация',
+        details: `${payload.type}: ${payload.subject}. Маршрут: ${routeGroup}`,
+        status: process.status === 'Завершен' ? 'Выполнена' : 'В работе'
+      });
+
+      draft.integrations.unshift({
+        id: integrationId,
+        system: payload.channel === 'Телефон' ? 'Телефония' : payload.channel === 'Email' ? 'Email Gateway' : 'API CRM Gateway',
+        status: 'Успешно',
+        lastSync: payload.at,
+        objectType: 'Коммуникация',
+        objectId: communicationId,
+        operation: payload.type === 'Обращение' ? 'Получение обращения и определение маршрута' : 'Регистрация коммуникации',
+        records: 1,
+        errors: [],
+        log: [
+          { at: payload.at, level: 'INFO', message: `Канал ${payload.channel}: карточка ${counterparty?.shortName ?? payload.counterpartyId}` },
+          { at: payload.at, level: 'INFO', message: `Категория "${payload.requestCategory}", маршрут "${routeGroup}"` }
+        ]
+      });
+      if (process && !process.integrationIds.includes(integrationId)) process.integrationIds.push(integrationId);
+
       if (taskId) {
         const plannedTask = payload.status === 'Запланирована';
+        const taskTemplate = startsAppealProcess ? appealTaskTemplate : draft.taskTemplates.find((item) => item.id === 'tt-communication-followup');
+        const requiredFields = startsAppealProcess
+          ? taskTemplate?.requiredFields ?? ['Суть обращения', 'Тип обращения', 'Канал обращения', 'Контакт/заявитель']
+          : plannedTask
+            ? ['Подготовлена повестка', 'Проведена коммуникация', 'Зафиксирован итог']
+            : ['Итог коммуникации', 'Следующий шаг', 'Ответственный'];
+        const completedFields = startsAppealProcess
+          ? requiredFields.filter((field) => ['Суть обращения', 'Тип обращения', 'Канал обращения', 'Контакт/заявитель'].includes(field))
+          : plannedTask
+            ? ['Подготовлена повестка']
+            : ['Итог коммуникации'];
+        const fieldResults: Record<string, string> = startsAppealProcess
+          ? {
+              'Суть обращения': payload.detectedIntent || payload.summary,
+              'Тип обращения': String(payload.requestCategory),
+              'Канал обращения': String(payload.channel),
+              'Контакт/заявитель': payload.participants || counterparty?.contacts[0]?.name || counterparty?.shortName || ''
+            }
+          : {
+              'Итог коммуникации': payload.summary,
+              'Следующий шаг': payload.nextAction,
+              Ответственный: payload.taskAssigneeId ? getUserName(draft, payload.taskAssigneeId) : routeGroup
+            };
+
         draft.tasks.unshift({
           id: taskId,
-          title: plannedTask ? `Подготовить коммуникацию: ${payload.subject}` : `Follow-up: ${payload.nextAction}`,
-          templateId: 'tt-communication-followup',
+          title: startsAppealProcess
+            ? buildTaskTitle(taskTemplate?.name ?? 'Классифицировать обращение клиента', counterparty?.shortName ?? payload.counterpartyId)
+            : plannedTask
+              ? `Подготовить коммуникацию: ${payload.subject}`
+              : `Follow-up: ${payload.nextAction}`,
+          templateId: taskTemplate?.id ?? 'tt-communication-followup',
           status: 'Новая',
-          priority: 'Средний',
+          priority: startsAppealProcess ? taskTemplate?.defaultPriority ?? 'Высокий' : 'Средний',
           counterpartyId: payload.counterpartyId,
-          processId: payload.processId || undefined,
+          processId: process?.id,
           assigneeId: payload.taskAssigneeId || undefined,
-          assigneeGroup: payload.taskGroup,
+          assigneeGroup: startsAppealProcess ? appealStage?.department ?? routeGroup : payload.taskGroup,
           dueDate: payload.taskDueDate,
           createdAt: payload.at,
-          requiredFields: plannedTask
-            ? ['Подготовлена повестка', 'Проведена коммуникация', 'Зафиксирован итог']
-            : ['Итог коммуникации', 'Следующий шаг', 'Ответственный'],
-          completedFields: plannedTask ? ['Подготовлена повестка'] : ['Итог коммуникации'],
+          requiredFields,
+          completedFields,
+          fieldResults,
           timeSpentHours: 0,
-          links: [payload.counterpartyId, payload.processId, communicationId].filter(Boolean) as string[],
+          links: [payload.counterpartyId, process?.id, communicationId].filter(Boolean) as string[],
           comments: [
-            plannedTask
-              ? `Задача на подготовку и проведение коммуникации: ${payload.subject}`
-              : `Создана автоматически из коммуникации: ${payload.subject}`,
+            startsAppealProcess
+              ? `Создана автоматически из входящего обращения. Маршрут: ${routeGroup}.`
+              : plannedTask
+                ? `Задача на подготовку и проведение коммуникации: ${payload.subject}`
+                : `Создана автоматически из коммуникации: ${payload.subject}`,
+            `Суть запроса: ${payload.detectedIntent || payload.summary}`,
             `Следующий шаг: ${payload.nextAction}`
           ],
           history: [
             {
               at: payload.at,
               actorId: currentUser.id,
-              action: 'Создана из коммуникации',
+              action: startsAppealProcess ? 'Создана при автозапуске процесса обращения' : 'Создана из коммуникации',
               details: payload.nextAction,
               status: 'Новая'
             }
           ]
         });
-        if (process) process.taskIds.push(taskId);
+        if (process && !process.taskIds.includes(taskId)) process.taskIds.push(taskId);
         const draftTemplate = process ? draft.processTemplates.find((item) => item.id === process.templateId) : undefined;
         draft.notifications.unshift(buildNotificationEvent({
           data: draft,
           processTemplate: draftTemplate,
-          triggerKind: 'Follow-up коммуникации',
-          fallbackTrigger: 'Follow-up по коммуникации',
-          fallbackRecipient: payload.taskGroup,
+          triggerKind: startsAppealProcess ? 'Запуск процесса' : 'Follow-up коммуникации',
+          fallbackTrigger: startsAppealProcess ? 'Автозапуск обработки обращения' : 'Follow-up по коммуникации',
+          fallbackRecipient: startsAppealProcess ? appealStage?.department ?? routeGroup : payload.taskGroup,
           objectId: taskId,
           at: payload.at,
           context: {
@@ -1970,17 +2508,25 @@ function App() {
             process,
             taskId,
             currentStage: process ? draftTemplate?.stages[process.stageIndex] : undefined,
-            assigneeGroup: payload.taskGroup,
+            assigneeGroup: startsAppealProcess ? appealStage?.department ?? routeGroup : payload.taskGroup,
             currentUser,
             dueDate: payload.taskDueDate
           }
         }));
-        addAudit(draft, 'Автоматическое создание follow-up задачи', 'Задача', taskId, 'Успешно', 'Системное событие');
+        addAudit(draft, startsAppealProcess ? 'Автоматическое создание задачи процесса обращения' : 'Автоматическое создание follow-up задачи', 'Задача', taskId, 'Успешно', 'Системное событие');
       }
       addAudit(draft, payload.status === 'Запланирована' ? 'Планирование коммуникации' : 'Фиксация итогов коммуникации', 'Коммуникация', communicationId);
+      if (createdProcessId) addAudit(draft, 'Автоматический запуск процесса по обращению', 'Процесс', createdProcessId, 'Успешно', 'Системное событие');
     });
-    setModal(taskId ? { type: 'taskDetail', id: taskId } : null);
-    notify(taskId ? `Коммуникация сохранена, создана связанная задача ${taskId}` : 'Коммуникация сохранена в карточке', 'success');
+    setModal(createdTaskId ? { type: 'taskDetail', id: createdTaskId } : null);
+    notify(
+      startsAppealProcess && createdProcessId
+        ? `Обращение зарегистрировано, процесс ${createdProcessId} и задача ${createdTaskId} созданы`
+        : createdTaskId
+          ? `Коммуникация сохранена, создана связанная задача ${createdTaskId}`
+          : 'Коммуникация сохранена в карточке',
+      'success'
+    );
   };
 
   const createFollowUpFromCommunication = (communicationId: string) => {
@@ -1993,7 +2539,7 @@ function App() {
       return;
     }
     const process = communication.processId ? data.processes.find((item) => item.id === communication.processId) : undefined;
-    const taskGroup = process?.currentGroup ?? 'Операционный контроль';
+    const taskGroup = process?.currentGroup ?? 'Управление операционного сопровождения';
     const taskDueDate = addDaysIsoDate(communication.at, 2);
     const maxTaskNumber = Math.max(
       2190,
@@ -2150,6 +2696,7 @@ function App() {
       const handoff: InternalHandoff = {
         id: handoffId,
         title: payload.title,
+        requestType: payload.requestType,
         sourceDepartment: payload.sourceDepartment,
         targetDepartment: payload.targetDepartment,
         status: 'Ожидает',
@@ -2166,7 +2713,7 @@ function App() {
             at: '2026-08-05T14:15:00+07:00',
             actorId: currentUser.id,
             action: 'Создано внутреннее поручение',
-            details: `${payload.sourceDepartment} -> ${payload.targetDepartment}`,
+            details: `${payload.requestType}: ${payload.sourceDepartment} -> ${payload.targetDepartment}`,
             status: 'Новая'
           }
         ]
@@ -2188,15 +2735,18 @@ function App() {
           createdAt: '2026-08-05T14:15:00+07:00',
           requiredFields: ['Запрошенное действие', 'Результат подразделения', 'Комментарий для инициатора'],
           completedFields: ['Запрошенное действие'],
+          fieldResults: {
+            'Запрошенное действие': `${payload.requestType}: ${payload.comment}`
+          },
           timeSpentHours: 0,
           links: [payload.counterpartyId, payload.processId, payload.taskId, handoffId].filter(Boolean) as string[],
-          comments: [payload.comment],
+          comments: [`${payload.requestType}: ${payload.comment}`],
           history: [
             {
               at: '2026-08-05T14:15:00+07:00',
               actorId: currentUser.id,
               action: 'Создана по внутреннему поручению',
-              details: payload.comment,
+              details: `${payload.requestType}: ${payload.comment}`,
               status: 'Новая'
             }
           ]
@@ -2271,10 +2821,11 @@ function App() {
     setModal({ type: 'documentUpload', linkedObjectType, linkedObjectId });
   };
 
-  const attachDocument = (payload: DocumentUploadPayload) => {
+  const attachDocument = (payload: DocumentUploadPayload, returnTaskId?: string) => {
     const id = `DOC-${930 + data.documents.length}`;
     const { linkedObjectType, linkedObjectId } = payload;
     const linkedProcess = linkedObjectType === 'Процесс' ? getProcess(data, linkedObjectId) : undefined;
+    const linkedTask = linkedObjectType === 'Задача' ? getTask(data, linkedObjectId) : undefined;
     mutate((draft) => {
       draft.documents.unshift({
         id,
@@ -2305,9 +2856,32 @@ function App() {
           status: draftProcess.status === 'Завершен' ? 'Выполнена' : 'В работе'
         });
       }
+      if (linkedTask) {
+        const draftTask = draft.tasks.find((task) => task.id === linkedTask.id);
+        if (draftTask && !draftTask.links.includes(id)) draftTask.links.push(id);
+        draftTask?.comments.unshift(`Добавлен файл: ${payload.file.name}. ${payload.businessPurpose}`);
+        draftTask?.history.unshift({
+          at: '2026-08-04T12:45:00+07:00',
+          actorId: currentUser.id,
+          action: 'Добавлен файл к задаче',
+          details: `${payload.file.name}: ${payload.businessPurpose}`,
+          status: draftTask.status
+        });
+        const draftProcess = draftTask?.processId ? draft.processes.find((process) => process.id === draftTask.processId) : undefined;
+        if (draftProcess && !draftProcess.documentIds.includes(id)) {
+          draftProcess.documentIds.push(id);
+          draftProcess.history.unshift({
+            at: '2026-08-04T12:45:00+07:00',
+            actorId: currentUser.id,
+            action: 'Добавлен файл через задачу',
+            details: `${draftTask?.id}: ${payload.file.name}`,
+            status: draftProcess.status === 'Завершен' ? 'Выполнена' : 'В работе'
+          });
+        }
+      }
       addAudit(draft, 'Загрузка файла в хранилище', linkedObjectType, linkedObjectId);
     });
-    setModal(null);
+    setModal(returnTaskId ? { type: 'taskDetail', id: returnTaskId } : null);
     notify(`Файл ${payload.file.name} добавлен в документы`, 'success');
   };
 
@@ -2516,7 +3090,7 @@ function App() {
       case 'reports':
         return <ReportsPage data={data} role={role} notify={notify} mutate={mutate} addAudit={addAudit} />;
       case 'designer':
-        return <DesignerPage data={data} role={role} mutate={mutate} notify={notify} addAudit={addAudit} />;
+        return <DesignerPage data={data} role={role} currentUserId={currentUser.id} mutate={mutate} notify={notify} addAudit={addAudit} />;
       case 'integrations':
         return (
           <IntegrationsPage
@@ -2530,7 +3104,7 @@ function App() {
           />
         );
       case 'wiki':
-        return <WikiPage data={data} role={role} mutate={mutate} notify={notify} addAudit={addAudit} />;
+        return <WikiPage data={data} role={role} currentUserId={currentUser.id} mutate={mutate} notify={notify} addAudit={addAudit} />;
       case 'dictionaries':
         return <DictionariesPage data={data} role={role} mutate={mutate} notify={notify} addAudit={addAudit} />;
       case 'logs':
@@ -2539,6 +3113,10 @@ function App() {
         return null;
     }
   };
+
+  if (!authenticatedUser) {
+    return <LoginPage data={data} onLogin={signIn} />;
+  }
 
   return (
     <div className="app-shell">
@@ -2587,17 +3165,25 @@ function App() {
             </label>
             <IconButton title="Найти" icon={Search} onClick={runGlobalSearch} />
             <IconButton title="Входящий звонок" icon={Phone} onClick={simulateIncomingCall} />
-            <IconButton title="Сбросить тестовые данные" icon={RotateCcw} onClick={resetPrototype} />
+            <IconButton title="Сбросить тестовые данные" icon={RotateCcw} onClick={resetDemoData} />
+            <div className="user-session-chip">
+              <UserRound size={16} />
+              <span>
+                <strong>{currentUser.name}</strong>
+                <small>{currentUser.maskedId}</small>
+              </span>
+            </div>
             <div className="role-switcher">
               <UserRound size={16} />
               <select value={role} onChange={(event) => switchRole(event.target.value as RoleKey)}>
-                {roles.map((item) => (
+                {availableRoles.map((item) => (
                   <option key={item.key} value={item.key}>
                     {item.label}
                   </option>
                 ))}
               </select>
             </div>
+            <IconButton title="Выйти" icon={LogOut} onClick={signOut} />
           </div>
         </header>
 
@@ -2651,6 +3237,7 @@ function App() {
           data={data}
           counterparty={getCounterparty(data, modal.counterpartyId)}
           counterpartyId={modal.counterpartyId}
+          preset={modal.preset}
           onClose={() => setModal(null)}
           onCreate={addCommunication}
         />
@@ -2684,8 +3271,8 @@ function App() {
           data={data}
           linkedObjectType={modal.linkedObjectType}
           linkedObjectId={modal.linkedObjectId}
-          onClose={() => setModal(null)}
-          onUpload={attachDocument}
+          onClose={() => setModal(modal.returnTaskId ? { type: 'taskDetail', id: modal.returnTaskId } : null)}
+          onUpload={(payload) => attachDocument(payload, modal.returnTaskId)}
         />
       )}
       {modal?.type === 'internalHandoff' && (
@@ -2710,9 +3297,22 @@ function App() {
           executeTask={executeTask}
           advanceProcess={advanceProcess}
           delegateTask={delegateTask}
+          linkTask={openTaskLinkModal}
+          unlinkTasks={unlinkTasks}
+          saveTaskCommunicationAction={saveTaskCommunicationAction}
+          saveTaskRequisitesAction={saveTaskRequisitesAction}
+          retryIntegration={retryIntegration}
           undoTask={undoTask}
           navigate={navigate}
           openModal={setModal}
+        />
+      )}
+      {modal?.type === 'taskLink' && (
+        <TaskLinkModal
+          data={data}
+          taskId={modal.id}
+          onClose={() => setModal({ type: 'taskDetail', id: modal.id })}
+          onSave={linkTasks}
         />
       )}
       {modal?.type === 'integrationLog' && (
@@ -2741,6 +3341,136 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function LoginPage({ data, onLogin }: { data: AppData; onLogin: (login: string, password: string) => boolean }) {
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [showAccessHelp, setShowAccessHelp] = useState(false);
+  const accessUsers = useMemo(
+    () =>
+      [...data.users].sort((left, right) => {
+        const roleOrder = { curator: 0, department: 1, owner: 2, admin: 3 } satisfies Record<RoleKey, number>;
+        return roleOrder[left.role] - roleOrder[right.role] || left.department.localeCompare(right.department, 'ru') || left.name.localeCompare(right.name, 'ru');
+      }),
+    [data.users]
+  );
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const success = onLogin(login, password);
+    if (!success) setError('Неверный логин или пароль.');
+  };
+
+  const selectUser = (user: User) => {
+    setLogin(user.maskedId);
+    setPassword('');
+    setError('');
+    setShowAccessHelp(false);
+  };
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-layout">
+        <div className="auth-hero">
+          <div className="brand auth-brand">
+            <span className="brand-mark">CRM</span>
+            <span>
+              <strong>Единый контур</strong>
+              <small>Клиенты · процессы · сервисы</small>
+            </span>
+          </div>
+          <div>
+            <span className="auth-eyebrow">Операционная CRM</span>
+            <h1>Вход в рабочее место</h1>
+            <p>Авторизация сотрудника для доступа к клиентам, задачам, процессам и журналам действий.</p>
+          </div>
+          <div className="auth-signal-grid">
+            <article>
+              <UsersRound size={18} />
+              <span>Клиенты ФЛ и ЮЛ</span>
+            </article>
+            <article>
+              <Workflow size={18} />
+              <span>Бизнес-процессы</span>
+            </article>
+            <article>
+              <ListChecks size={18} />
+              <span>Задачи и SLA</span>
+            </article>
+            <article>
+              <MessageSquare size={18} />
+              <span>Коммуникации и обращения</span>
+            </article>
+          </div>
+        </div>
+
+        <form className="auth-card" onSubmit={submit}>
+          <div className="auth-card-head">
+            <LockKeyhole size={22} />
+            <div>
+              <h2>Авторизация</h2>
+              <p>Введите логин и пароль учетной записи</p>
+            </div>
+            <button className="auth-help-button" type="button" onClick={() => setShowAccessHelp(true)} aria-label="Справка по входу">
+              <CircleHelp size={18} />
+            </button>
+          </div>
+          <label className="auth-field">
+            <span>Логин</span>
+            <input value={login} onChange={(event) => { setLogin(event.target.value); setError(''); }} placeholder="Логин или email" spellCheck={false} autoFocus />
+          </label>
+          <label className="auth-field">
+            <span>Пароль</span>
+            <input value={password} onChange={(event) => { setPassword(event.target.value); setError(''); }} type="password" placeholder="Введите пароль" spellCheck={false} />
+          </label>
+          {error ? <div className="auth-error">{error}</div> : null}
+          <Button icon={LockKeyhole} variant="primary" type="submit">
+            Войти
+          </Button>
+        </form>
+
+        {showAccessHelp ? (
+          <div
+            className="auth-access-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Справка по входу"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setShowAccessHelp(false);
+            }}
+          >
+            <section className="auth-access-panel">
+              <div className="auth-access-head">
+                <div>
+                  <h2>Справка по входу</h2>
+                  <p>Для демонстрационного контура выберите учетную запись. Пароль вводится тем же значением, что и логин.</p>
+                </div>
+                <button type="button" onClick={() => setShowAccessHelp(false)} aria-label="Закрыть">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="auth-user-list">
+                {accessUsers.map((user) => {
+                  const roleDefinition = roles.find((item) => item.key === user.role);
+                  return (
+                    <button key={user.id} type="button" onClick={() => selectUser(user)}>
+                      <span>
+                        <strong>{user.name}</strong>
+                        <small>{roleDefinition?.label ?? user.role} · {user.department}</small>
+                      </span>
+                      <Badge tone="blue">{user.maskedId}</Badge>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+        ) : null}
+      </section>
+    </main>
   );
 }
 
@@ -3134,16 +3864,18 @@ function OperationalDynamicsChart({ points, onSelect }: { points: OperationalPoi
   const chartTop = 18;
   const chartBottom = 132;
   const chartLeft = 38;
-  const chartRight = width - 20;
-  const max = Math.max(1, ...points.flatMap((point) => [point.created, point.closed, point.pressure]));
+  const chartRight = width - 42;
+  const workloadMax = Math.max(1, ...points.flatMap((point) => [point.created, point.closed]));
+  const pressureMax = Math.max(1, ...points.map((point) => point.pressure));
   const xStep = (chartRight - chartLeft) / Math.max(1, points.length - 1);
-  const scaleY = (value: number) => chartBottom - (value / max) * (chartBottom - chartTop);
+  const scaleWorkloadY = (value: number) => chartBottom - (value / workloadMax) * (chartBottom - chartTop);
+  const scalePressureY = (value: number) => chartBottom - (value / pressureMax) * (chartBottom - chartTop);
   const coords = points.map((point, index) => ({
     ...point,
     x: chartLeft + index * xStep,
-    createdHeight: chartBottom - scaleY(point.created),
-    closedHeight: chartBottom - scaleY(point.closed),
-    pressureY: scaleY(point.pressure)
+    createdHeight: chartBottom - scaleWorkloadY(point.created),
+    closedHeight: chartBottom - scaleWorkloadY(point.closed),
+    pressureY: scalePressureY(point.pressure)
   }));
   const pressureLine = coords.map((point) => `${point.x},${point.pressureY}`).join(' ');
 
@@ -3156,7 +3888,10 @@ function OperationalDynamicsChart({ points, onSelect }: { points: OperationalPoi
             <g key={level}>
               <line className="ops-grid-line" x1={chartLeft} x2={chartRight} y1={y} y2={y} />
               <text className="ops-axis-label" x={6} y={y + 4}>
-                {Math.round(max * level)}
+                {Math.round(workloadMax * level)}
+              </text>
+              <text className="ops-axis-label ops-axis-label-pressure" x={chartRight + 8} y={y + 4}>
+                {Math.round(pressureMax * level)}
               </text>
             </g>
           );
@@ -3165,8 +3900,12 @@ function OperationalDynamicsChart({ points, onSelect }: { points: OperationalPoi
           <g key={point.id} className="ops-day" onClick={() => onSelect(point)}>
             <title>{`${point.label}: создано ${point.created}, закрыто ${point.closed}, SLA-давление ${point.pressure}`}</title>
             <rect className="ops-hitbox" x={point.x - xStep / 2} y={0} width={Math.max(42, xStep)} height={height} />
-            <rect className="ops-bar created" x={point.x - 16} y={chartBottom - point.createdHeight} width={13} height={Math.max(2, point.createdHeight)} rx={4} />
-            <rect className="ops-bar closed" x={point.x + 3} y={chartBottom - point.closedHeight} width={13} height={Math.max(2, point.closedHeight)} rx={4} />
+            {point.created > 0 ? (
+              <rect className="ops-bar created" x={point.x - 16} y={chartBottom - Math.max(4, point.createdHeight)} width={13} height={Math.max(4, point.createdHeight)} rx={4} />
+            ) : null}
+            {point.closed > 0 ? (
+              <rect className="ops-bar closed" x={point.x + 3} y={chartBottom - Math.max(4, point.closedHeight)} width={13} height={Math.max(4, point.closedHeight)} rx={4} />
+            ) : null}
             {point.created > 0 ? (
               <text className="ops-bar-value created-value" x={point.x - 9.5} y={Math.max(chartTop + 10, chartBottom - point.createdHeight - 6)} textAnchor="middle">
                 {point.created}
@@ -3183,14 +3922,18 @@ function OperationalDynamicsChart({ points, onSelect }: { points: OperationalPoi
           </g>
         ))}
         <polyline className="ops-pressure-line" points={pressureLine} />
-        {coords.map((point) => (
-          <g key={`${point.id}-pressure`} className="ops-pressure-point" onClick={() => onSelect(point)}>
-            <circle cx={point.x} cy={point.pressureY} r="5" />
-            <text x={point.x} y={point.pressureY - 9} textAnchor="middle">
-              {point.pressure}
-            </text>
-          </g>
-        ))}
+        {coords.map((point, index) => {
+          const pressureLabelX = index === coords.length - 1 ? point.x - 14 : point.x;
+          const pressureLabelY = point.pressureY <= chartTop + 12 ? point.pressureY + 17 : point.pressureY - 9;
+          return (
+            <g key={`${point.id}-pressure`} className="ops-pressure-point" onClick={() => onSelect(point)}>
+              <circle cx={point.x} cy={point.pressureY} r="5" />
+              <text x={pressureLabelX} y={pressureLabelY} textAnchor="middle">
+                {point.pressure}
+              </text>
+            </g>
+          );
+        })}
       </svg>
     </div>
   );
@@ -3269,35 +4012,57 @@ function DashboardPage({
     })
     .slice(0, 4);
   const todayKey = today.toISOString().slice(0, 10);
-  const trendDates = Array.from({ length: 6 }, (_, index) => {
+  const fallbackTrendDates = Array.from({ length: 6 }, (_, index) => {
     const date = new Date(today);
     date.setDate(today.getDate() - (5 - index));
     return date.toISOString().slice(0, 10);
   });
+  const getCompletionDate = (task: Task) => {
+    const completionDates = task.history
+      .filter((entry) => entry.at && (entry.status === 'Выполнена' || entry.action.includes('Выполнена')))
+      .map((entry) => entry.at.slice(0, 10))
+      .sort();
+    return completionDates[0];
+  };
+  const activityDates = Array.from(
+    new Set(
+      data.tasks.flatMap((task) => [
+        task.createdAt.slice(0, 10),
+        ...task.history
+          .filter((entry) => entry.at && (entry.status === 'Выполнена' || entry.action.includes('Выполнена')))
+          .map((entry) => entry.at.slice(0, 10))
+      ])
+    )
+  )
+    .filter((date) => date <= todayKey)
+    .sort();
+  const trendDates = activityDates.length ? activityDates.slice(-6) : fallbackTrendDates;
   const operationalDynamics: OperationalPoint[] = trendDates.map((date) => {
     const created = data.tasks.filter((task) => task.createdAt.startsWith(date)).length;
-    const closed = data.tasks.filter((task) =>
-      task.history.some((entry) => entry.at.startsWith(date) && (entry.status === 'Выполнена' || entry.action.includes('Выполнена')))
-    ).length;
-    const dueToday = openTasks.filter((task) => task.dueDate === date).length;
-    const overdueByDate = openTasks.filter((task) => task.dueDate < date).length;
+    const closed = data.tasks.filter((task) => getCompletionDate(task) === date).length;
+    const pressure = data.tasks.filter((task) => {
+      const createdDate = task.createdAt.slice(0, 10);
+      const completionDate = getCompletionDate(task);
+      return createdDate <= date && task.dueDate <= date && (!completionDate || completionDate > date) && task.status !== 'Отменена';
+    }).length;
     return {
       id: date,
       label: `${date.slice(8, 10)}.${date.slice(5, 7)}`,
       created,
       closed,
-      pressure: dueToday + overdueByDate
+      pressure
     };
   });
   const emptyDynamics: OperationalPoint = { id: todayKey, label: '-', created: 0, closed: 0, pressure: 0 };
-  const todayDynamics = operationalDynamics.find((point) => point.id === todayKey) ?? operationalDynamics[operationalDynamics.length - 1] ?? emptyDynamics;
+  const latestDynamics = operationalDynamics[operationalDynamics.length - 1] ?? emptyDynamics;
   const pressurePeak = operationalDynamics.reduce((peak, point) => (point.pressure > peak.pressure ? point : peak), operationalDynamics[0] ?? emptyDynamics);
   const createdTotal = operationalDynamics.reduce((sum, point) => sum + point.created, 0);
   const closedTotal = operationalDynamics.reduce((sum, point) => sum + point.closed, 0);
   const backlogDelta = createdTotal - closedTotal;
-  const pressureTone = todayDynamics.pressure >= 5 ? 'red' : todayDynamics.pressure > 0 ? 'amber' : 'green';
+  const currentSlaPressure = openTasks.filter((task) => task.dueDate <= todayKey).length;
+  const pressureTone = currentSlaPressure >= 5 ? 'red' : currentSlaPressure > 0 ? 'amber' : 'green';
   const operationalFocus =
-    todayDynamics.pressure >= 5
+    currentSlaPressure >= 5
       ? 'перераспределить SLA'
       : backlogDelta > 0
         ? 'рост очереди'
@@ -3401,9 +4166,9 @@ function DashboardPage({
           <div className="panel-header">
             <div>
               <h2>Операционная динамика</h2>
-              <p>Синие столбцы — создано, зеленые — закрыто, красная линия — задачи с риском SLA</p>
+              <p>Последние дни с операционной активностью: синие — создано, зеленые — закрыто, красная линия — риск SLA на конец дня</p>
             </div>
-            <Badge tone={pressureTone}>SLA сегодня: {todayDynamics.pressure}</Badge>
+            <Badge tone={pressureTone}>SLA сейчас: {currentSlaPressure}</Badge>
           </div>
           <OperationalDynamicsChart points={operationalDynamics} onSelect={(point) => navigate({ page: 'tasks', filter: { query: point.id } })} />
           <div className="ops-legend">
@@ -3416,9 +4181,9 @@ function DashboardPage({
             <span>Красная выше — риск SLA выше</span>
           </div>
           <div className="ops-insights">
-            <button onClick={() => navigate({ page: 'tasks', filter: { query: todayKey } })}>
-              <small>Сегодня</small>
-              <strong>{todayDynamics.created} / {todayDynamics.closed}</strong>
+            <button onClick={() => navigate({ page: 'tasks', filter: { query: latestDynamics.id } })}>
+              <small>Последний срез</small>
+              <strong>{latestDynamics.created} / {latestDynamics.closed}</strong>
               <span>вход / выход</span>
             </button>
             <button onClick={() => navigate({ page: 'tasks', filter: { query: pressurePeak.id } })}>
@@ -3971,7 +4736,7 @@ function CommunicationsPage({
       const counterparty = getCounterparty(data, communication.counterpartyId);
       const process = getProcess(data, communication.processId);
       const hit = normalize(
-        `${communication.id} ${communication.subject} ${communication.summary} ${communication.nextAction} ${counterparty?.name ?? ''} ${process?.title ?? ''} ${communication.participants?.join(' ') ?? ''}`
+        `${communication.id} ${communication.subject} ${communication.summary} ${communication.detectedIntent ?? ''} ${communication.requestCategory ?? ''} ${communication.routeGroup ?? ''} ${communication.nextAction} ${counterparty?.name ?? ''} ${process?.title ?? ''} ${communication.participants?.join(' ') ?? ''}`
       ).includes(normalize(query));
       return (
         visibleCounterpartyIds.has(communication.counterpartyId) &&
@@ -4035,12 +4800,14 @@ function CommunicationsPage({
                       <Badge tone="cyan">{communication.type}</Badge>
                       <Badge tone={statusTone(communication.status ?? 'Проведена')}>{communication.status ?? 'Проведена'}</Badge>
                       {communication.channel ? <Badge tone="neutral">{communication.channel}</Badge> : null}
+                      {communication.requestCategory ? <Badge tone="violet">{communication.requestCategory}</Badge> : null}
                     </div>
                     <h3>{communication.subject}</h3>
                   </div>
                   <strong>{formatDateTime(communication.at)}</strong>
                 </div>
                 <p>{communication.summary}</p>
+                {communication.detectedIntent ? <p className="communication-intent">{communication.detectedIntent}</p> : null}
                 <div className="mini-checklist">
                   {(communication.agenda ?? ['Повестка не заполнена']).map((item) => (
                     <span key={item}>{item}</span>
@@ -4051,6 +4818,7 @@ function CommunicationsPage({
                     {counterparty?.shortName ?? communication.counterpartyId}
                   </button>
                   <span>{communication.participants?.join(', ') || getUserName(data, communication.responsibleId)}</span>
+                  {communication.routeGroup ? <span>Маршрут: {communication.routeGroup}</span> : null}
                   <span>Следующий шаг: {communication.nextAction}</span>
                 </div>
                 <div className="actions compact">
@@ -4107,7 +4875,7 @@ function CoordinationPage({
       handoff.targetDepartment === currentUser?.department ||
       handoff.sourceDepartment === currentUser?.department ||
       task?.assigneeId === currentUserId;
-    const hit = normalize(`${handoff.id} ${handoff.title} ${handoff.comment} ${counterparty?.name ?? ''} ${process?.title ?? ''}`).includes(normalize(query));
+    const hit = normalize(`${handoff.id} ${handoff.requestType ?? ''} ${handoff.title} ${handoff.comment} ${counterparty?.name ?? ''} ${process?.title ?? ''}`).includes(normalize(query));
     return roleVisible && hit && (status === 'Все' || handoff.status === status) && (department === 'Все' || handoff.targetDepartment === department || handoff.sourceDepartment === department);
   });
   const rows = [...visibleRows].sort((a, b) => {
@@ -4181,7 +4949,10 @@ function HandoffCard({
     <article className={`handoff-card ${handoff.status === 'Просрочено' ? 'danger' : ''}`}>
       <div className="handoff-header">
         <span>{handoff.id}</span>
-        <Badge tone={statusTone(handoff.status)}>{handoff.status}</Badge>
+        <div className="badge-row">
+          {handoff.requestType ? <Badge tone="cyan">{handoff.requestType}</Badge> : null}
+          <Badge tone={statusTone(handoff.status)}>{handoff.status}</Badge>
+        </div>
       </div>
       <h3>{handoff.title}</h3>
       <div className="handoff-route">
@@ -4298,7 +5069,14 @@ function CounterpartyDetailPage({
   const overdueTasks = activeTasks.filter(isTaskDeadlineOverdue);
   const nearDueTasks = activeTasks.filter((task) => daysBetween(task.dueDate) >= 0 && daysBetween(task.dueDate) <= 2);
   const activeProcesses = processes.filter((process) => !['Завершен', 'Остановлен'].includes(process.status));
+  const lastCommunication = [...communications].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
+  const nextWorkItem = [...activeTasks].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0];
   const incidentCount = item.services.reduce((sum, service) => sum + service.incidentCount, 0);
+  const externalChecks = buildExternalSourceChecks(item, risk);
+  const externalCheckTone = externalChecks.some((check) => check.tone === 'red') ? 'red' : externalChecks.some((check) => check.tone === 'amber') ? 'amber' : 'green';
+  const externalCheckLog = [...data.integrations]
+    .filter((integration) => integration.objectId === item.id && integration.objectType === 'Проверки' && integration.operation.includes('Проверка внешних источников'))
+    .sort((a, b) => new Date(b.lastSync).getTime() - new Date(a.lastSync).getTime())[0];
   const integrationErrors = data.integrations.filter(
     (integration) =>
       integration.status === 'Ошибка' &&
@@ -4375,6 +5153,30 @@ function CounterpartyDetailPage({
     notify(`Контрольные сигналы обновлены: ${controlLevel.toLowerCase()}`, controlTone === 'red' ? 'warning' : 'success');
   };
 
+  const refreshExternalChecks = () => {
+    const integrationId = getNextSequentialId('INT-', data.integrations.map((integration) => integration.id), 620, 3);
+    mutate((draft) => {
+      draft.integrations.unshift({
+        id: integrationId,
+        system: 'API CRM Gateway',
+        status: 'Успешно',
+        lastSync: '2026-08-05T14:45:00+07:00',
+        objectType: 'Проверки',
+        objectId: item.id,
+        operation: 'Проверка внешних источников РФ/РК',
+        records: externalChecks.length,
+        errors: [],
+        log: externalChecks.map((check) => ({
+          at: '2026-08-05T14:45:00+07:00',
+          level: check.tone === 'red' ? 'WARN' : 'INFO',
+          message: `${check.label}: ${check.result}. Источник: ${check.source}. ${check.detail}`
+        }))
+      });
+      addAudit(draft, 'Проверка внешних источников', 'Контрагент', item.id, 'Успешно', 'Межсистемное взаимодействие');
+    });
+    notify(externalCheckTone === 'green' ? 'Проверки обновлены: критичных сигналов нет' : 'Проверки обновлены: есть сигналы для контроля', externalCheckTone === 'red' ? 'warning' : 'info');
+  };
+
   const tabs = [
     ['profile', 'Общая информация'],
     ['processes', 'Процессы'],
@@ -4426,6 +5228,30 @@ function CounterpartyDetailPage({
               <div>
                 <h2>{isIndividual ? 'Профиль физического лица' : 'Единый профиль юридического лица'}</h2>
                 <p>{isIndividual ? 'Идентификация, ПДн, карта, канал обслуживания, обращения и клиентские сервисы' : 'Реквизиты, контакты, сервисы, контрольные даты и связанные подразделения'}</p>
+              </div>
+            </div>
+            <div className="service-start-card">
+              <div className="service-start-main">
+                <span>Сквозное обслуживание</span>
+                <strong>{lastCommunication ? `${lastCommunication.type}: ${lastCommunication.subject}` : 'Новых контактов нет'}</strong>
+                <small>
+                  {nextWorkItem
+                    ? `Ближайшая задача: ${nextWorkItem.id}, срок ${formatDate(nextWorkItem.dueDate)}`
+                    : activeProcesses.length
+                      ? `Активный процесс: ${activeProcesses[0].id}`
+                      : 'Можно начать обслуживание из карточки клиента'}
+                </small>
+              </div>
+              <div className="service-start-actions">
+                <Button icon={Phone} variant="primary" onClick={() => openModal({ type: 'communication', counterpartyId: item.id, preset: 'incomingCall' })}>
+                  Входящий контакт
+                </Button>
+                <Button icon={MessageSquare} onClick={() => openModal({ type: 'communication', counterpartyId: item.id, preset: 'appeal' })}>
+                  Обращение
+                </Button>
+                <Button icon={Network} onClick={() => openModal({ type: 'internalHandoff', counterpartyId: item.id })}>
+                  Запрос в подразделение
+                </Button>
               </div>
             </div>
             <div className="profile-grid">
@@ -4545,6 +5371,39 @@ function CounterpartyDetailPage({
                 </article>
               ))}
             </div>
+            <div className="external-checks-card">
+              <div className="external-checks-head">
+                <div>
+                  <h3>Проверки по внешним источникам</h3>
+                  <small>{isIndividual ? 'ФЛ' : 'ЮЛ'} · РФ/РК · {externalCheckLog ? `обновлено ${formatDateTime(externalCheckLog.lastSync)}` : 'ожидает обновления'}</small>
+                </div>
+                <Badge tone={externalCheckTone}>{externalCheckTone === 'green' ? 'Без критичных сигналов' : 'Есть сигналы'}</Badge>
+              </div>
+              <div className="external-check-list">
+                {externalChecks.map((check) => (
+                  <article key={check.id} className={check.tone}>
+                    <span>
+                      <strong>{check.label}</strong>
+                      <small>{check.source}</small>
+                    </span>
+                    <span>
+                      <Badge tone={check.tone}>{check.result}</Badge>
+                      <small>{check.detail}</small>
+                    </span>
+                  </article>
+                ))}
+              </div>
+              <div className="external-check-actions">
+                <Button icon={ShieldCheck} onClick={refreshExternalChecks}>
+                  Обновить проверки
+                </Button>
+                {externalCheckLog ? (
+                  <Button icon={History} onClick={() => openModal({ type: 'integrationLog', id: externalCheckLog.id })}>
+                    Лог
+                  </Button>
+                ) : null}
+              </div>
+            </div>
             <details className="control-methods">
               <summary>Источники данных</summary>
               <dl>
@@ -4636,12 +5495,14 @@ function CounterpartyDetailPage({
                       <Badge tone="cyan">{communication.type}</Badge>
                       <Badge tone={statusTone(communication.status ?? 'Проведена')}>{communication.status ?? 'Проведена'}</Badge>
                       {communication.channel ? <Badge tone="neutral">{communication.channel}</Badge> : null}
+                      {communication.requestCategory ? <Badge tone="violet">{communication.requestCategory}</Badge> : null}
                     </div>
                     <h3>{communication.subject}</h3>
                   </div>
                   <strong>{formatDateTime(communication.at)}</strong>
                 </div>
                 <p>{communication.summary}</p>
+                {communication.detectedIntent ? <p className="communication-intent">{communication.detectedIntent}</p> : null}
                 {communication.agenda?.length ? (
                   <div className="mini-checklist">
                     {communication.agenda.map((item) => (
@@ -4652,6 +5513,7 @@ function CounterpartyDetailPage({
                 <div className="communication-meta">
                   <span>Ответственный: {getUserName(data, communication.responsibleId)}</span>
                   <span>Участники: {communication.participants?.join(', ') || 'не указаны'}</span>
+                  {communication.routeGroup ? <span>Маршрут: {communication.routeGroup}</span> : null}
                   <span>Следующий шаг: {communication.nextAction}</span>
                 </div>
                 <div className="actions compact">
@@ -6606,12 +7468,14 @@ function ReportsPage({
 function DesignerPage({
   data,
   role,
+  currentUserId,
   mutate,
   notify,
   addAudit
 }: {
   data: AppData;
   role: RoleKey;
+  currentUserId: string;
   mutate: (updater: (draft: AppData) => void) => void;
   notify: (message: string, tone?: ToastTone) => void;
   addAudit: (draft: AppData, action: string, objectType: string, objectName: string, result?: AuditLog['result'], type?: AuditLog['logType']) => void;
@@ -6629,7 +7493,7 @@ function DesignerPage({
   const defaultTaskTemplateId = data.taskTemplates[0]?.id ?? '';
   const [stageDraft, setStageDraft] = useState({
     name: 'Новый этап процесса',
-    department: 'Операционный контроль',
+    department: 'Управление операционного сопровождения',
     slaHours: 8,
     autoTaskTemplateId: defaultTaskTemplateId,
     requiredAttributes: 'Результат проверки, Комментарий исполнителя',
@@ -6718,7 +7582,6 @@ function DesignerPage({
     text: 'Согласующий определяется по роли владельца процесса'
   });
   const canAdmin = role === 'admin';
-  const currentAdmin = roles.find((item) => item.key === role);
 
   useEffect(() => {
     if (!template) return;
@@ -6827,7 +7690,7 @@ function DesignerPage({
         version: item.version,
         status: item.status,
         changedAt: new Date().toISOString(),
-        authorId: currentAdmin?.userId ?? 'u-008',
+        authorId: currentUserId,
         changeSummary: 'Сохранена конфигурация опубликованной версии перед редактированием',
         stagesCount: item.stages.length,
         snapshot: buildTemplateSnapshot(item)
@@ -6860,7 +7723,7 @@ function DesignerPage({
             version: template.version,
             status: template.status,
             changedAt: '2026-08-04T09:00:00+07:00',
-            authorId: currentAdmin?.userId ?? 'u-008',
+            authorId: currentUserId,
             changeSummary: 'Текущая версия из демонстрационного набора',
             stagesCount: template.stages.length
           }
@@ -6913,7 +7776,7 @@ function DesignerPage({
           {
             id: initialStageId,
             name: 'Первичная проверка',
-            department: taskTemplate?.assigneeGroup ?? 'Операционный контроль',
+            department: taskTemplate?.assigneeGroup ?? 'Управление операционного сопровождения',
             slaHours: taskTemplate?.slaHours ?? 8,
             autoTaskTemplateId: taskTemplate?.id ?? defaultTaskTemplateId,
             requiredAttributes: taskTemplate?.requiredFields ?? ['Результат проверки'],
@@ -6932,7 +7795,7 @@ function DesignerPage({
         notificationTemplates: [
           {
             ...buildDefaultNotificationTemplate(`${id}-nt-start`),
-            recipientFallback: taskTemplate?.assigneeGroup ?? 'Операционный контроль'
+            recipientFallback: taskTemplate?.assigneeGroup ?? 'Управление операционного сопровождения'
           }
         ],
         versionHistory: []
@@ -6942,7 +7805,7 @@ function DesignerPage({
           version: 1,
           status: 'Черновик',
           changedAt: new Date().toISOString(),
-          authorId: currentAdmin?.userId ?? 'u-008',
+          authorId: currentUserId,
           changeSummary: 'Создан новый шаблон в конструкторе',
           stagesCount: 1,
           snapshot: buildTemplateSnapshot(createdTemplate)
@@ -6974,7 +7837,7 @@ function DesignerPage({
             version: nextVersion,
             status: 'Актуальная',
             changedAt: new Date().toISOString(),
-            authorId: currentAdmin?.userId ?? 'u-008',
+            authorId: currentUserId,
             changeSummary: 'Опубликована версия после проверки маршрута, форм и правил',
             stagesCount: item.stages.length,
             snapshot: buildTemplateSnapshot(item)
@@ -7008,7 +7871,7 @@ function DesignerPage({
             version: targetVersion,
             status: 'Черновик',
             changedAt: new Date().toISOString(),
-            authorId: currentAdmin?.userId ?? 'u-008',
+            authorId: currentUserId,
             changeSummary: 'Восстановлена выбранная версия как черновик для проверки',
             stagesCount: item.stages.length,
             snapshot: buildTemplateSnapshot(item)
@@ -7111,7 +7974,7 @@ function DesignerPage({
         const newStage: ProcessStage = {
           id: newId,
           name: stageDraft.name.trim(),
-          department: stageDraft.department.trim() || 'Операционный контроль',
+          department: stageDraft.department.trim() || 'Управление операционного сопровождения',
           slaHours: Number(stageDraft.slaHours) || 8,
           autoTaskTemplateId: stageDraft.autoTaskTemplateId || defaultTaskTemplateId,
           requiredAttributes: splitList(stageDraft.requiredAttributes),
@@ -7376,7 +8239,7 @@ function DesignerPage({
 	        id,
 	        name: taskTemplateDraft.name.trim(),
 	        entityType: taskTemplateDraft.entityType.trim() || 'Операционная задача',
-	        assigneeGroup: taskTemplateDraft.assigneeGroup.trim() || 'Операционный контроль',
+	        assigneeGroup: taskTemplateDraft.assigneeGroup.trim() || 'Управление операционного сопровождения',
 	        requiredFields: taskTemplateDraft.requiredFields.length ? taskTemplateDraft.requiredFields : ['Основание', 'Результат'],
 	        slaHours: Number(taskTemplateDraft.slaHours) || 8,
 	        statusModel: taskTemplateDraft.statusModel.length ? taskTemplateDraft.statusModel : ['Новая', 'Назначена', 'В работе', 'Выполнена'],
@@ -7564,7 +8427,7 @@ function DesignerPage({
             name: notificationDraft.name.trim(),
             subject: notificationDraft.subject.trim(),
             body: notificationDraft.body.trim(),
-            recipientFallback: notificationDraft.recipientFallback.trim() || 'Операционный контроль',
+            recipientFallback: notificationDraft.recipientFallback.trim() || 'Управление операционного сопровождения',
             variables: notificationDraft.variables.length ? notificationDraft.variables : notificationVariableOptions
           }
         ];
@@ -8263,8 +9126,8 @@ function DesignerPage({
 	                      <h3>Валидация шаблона задачи</h3>
 	                      <div className="evd-rules-columns one-column">
 	                        <div>
-	                          {taskTemplateValidationRules(selectedTaskTemplate).map((rule) => (
-	                            <p key={rule} className="rule-line">
+	                          {taskTemplateValidationRules(selectedTaskTemplate).map((rule, ruleIndex) => (
+	                            <p key={`${selectedTaskTemplate.id}-validation-${ruleIndex}-${rule}`} className="rule-line">
 	                              <span>{rule}</span>
 	                              {canAdmin ? <button onClick={() => deleteTaskValidationRule(rule)}>Удалить</button> : null}
 	                            </p>
@@ -8510,8 +9373,8 @@ function DesignerPage({
                         ].map(([kind, title, rules]) => (
                           <div key={String(kind)}>
                             <strong>{String(title)}</strong>
-                            {(rules as string[]).map((rule) => (
-                              <p key={rule} className="rule-line">
+                            {(rules as string[]).map((rule, ruleIndex) => (
+                              <p key={`${kind}-${ruleIndex}-${rule}`} className="rule-line">
                                 <span>{rule}</span>
                                 {canAdmin ? <button onClick={() => deleteEvdRule(kind as typeof evdRuleDraft.kind, rule)}>Удалить</button> : null}
                               </p>
@@ -8623,8 +9486,8 @@ function DesignerPage({
                 ].map(([kind, title, rules]) => (
                   <section key={String(kind)}>
                     <h3>{String(title)}</h3>
-                    {(rules as string[]).map((rule) => (
-                      <p key={rule} className="rule-line">
+                    {(rules as string[]).map((rule, ruleIndex) => (
+                      <p key={`${kind}-${ruleIndex}-${rule}`} className="rule-line">
                         <span>{rule}</span>
                         {canAdmin ? <button onClick={() => deleteRule(kind as typeof ruleDraft.kind, rule)}>Удалить</button> : null}
                       </p>
@@ -8975,19 +9838,19 @@ function renderWikiContent(content: string) {
 function WikiPage({
   data,
   role,
+  currentUserId,
   mutate,
   notify,
   addAudit
 }: {
   data: AppData;
   role: RoleKey;
+  currentUserId: string;
   mutate: (updater: (draft: AppData) => void) => void;
   notify: (message: string, tone?: ToastTone) => void;
   addAudit: (draft: AppData, action: string, objectType: string, objectName: string, result?: AuditLog['result'], type?: AuditLog['logType']) => void;
 }) {
   const canAdmin = role === 'admin';
-  const currentRole = roles.find((item) => item.key === role);
-  const currentUserId = currentRole?.userId ?? data.users[0]?.id ?? 'u-001';
   const [query, setQuery] = useState('');
   const [selectedSpace, setSelectedSpace] = useState('Все');
   const [selectedStatus, setSelectedStatus] = useState<'Все' | AppData['wiki'][number]['status']>('Все');
@@ -10494,7 +11357,7 @@ function TaskDelegateModal({
   onSave: (payload: TaskDelegationPayload) => void;
 }) {
   const task = getTask(data, taskId);
-  const initialGroup = task?.assigneeGroup ?? data.users[0]?.department ?? 'Операционный контроль';
+  const initialGroup = task?.assigneeGroup ?? data.users[0]?.department ?? 'Управление операционного сопровождения';
   const [group, setGroup] = useState(initialGroup);
   const [assigneeId, setAssigneeId] = useState(task?.assigneeId ?? '');
   const [comment, setComment] = useState('Передача задачи другому исполнителю.');
@@ -10583,46 +11446,184 @@ function TaskDelegateModal({
   );
 }
 
+function TaskLinkModal({
+  data,
+  taskId,
+  onClose,
+  onSave
+}: {
+  data: AppData;
+  taskId: string;
+  onClose: () => void;
+  onSave: (payload: TaskLinkPayload) => void;
+}) {
+  const task = getTask(data, taskId);
+  const availableTasks = useMemo(() => {
+    if (!task) return [];
+    return data.tasks
+      .filter((item) => item.id !== task.id && !task.links.includes(item.id) && !item.links.includes(task.id))
+      .sort((a, b) => {
+        const processRankA = a.processId && a.processId === task.processId ? 0 : 1;
+        const processRankB = b.processId && b.processId === task.processId ? 0 : 1;
+        const counterpartyRankA = a.counterpartyId && a.counterpartyId === task.counterpartyId ? 0 : 1;
+        const counterpartyRankB = b.counterpartyId && b.counterpartyId === task.counterpartyId ? 0 : 1;
+        return processRankA - processRankB || counterpartyRankA - counterpartyRankB || new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      });
+  }, [data.tasks, task]);
+  const [targetTaskId, setTargetTaskId] = useState('');
+  const [relationType, setRelationType] = useState<TaskLinkRule['relationType']>('Связанная задача');
+  const [comment, setComment] = useState('Связь добавлена вручную в карточке задачи.');
+  const targetTask = getTask(data, targetTaskId);
+
+  useEffect(() => {
+    setTargetTaskId(availableTasks[0]?.id ?? '');
+    setRelationType('Связанная задача');
+    setComment('Связь добавлена вручную в карточке задачи.');
+  }, [taskId, availableTasks[0]?.id]);
+
+  if (!task) return null;
+
+  return (
+    <Modal title={`Связать задачу ${task.id}`} onClose={onClose}>
+      <form
+        className="modal-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!targetTaskId) return;
+          onSave({
+            sourceTaskId: task.id,
+            targetTaskId,
+            relationType,
+            comment: comment.trim()
+          });
+        }}
+      >
+        <div className="object-mini-header">
+          <div>
+            <h2>{task.title}</h2>
+            <p>{task.processId ? `${task.processId} · ` : ''}{task.counterpartyId ? getCounterparty(data, task.counterpartyId)?.shortName ?? task.counterpartyId : 'Без контрагента'}</p>
+          </div>
+          <Badge tone={statusTone(task.status)}>{task.status}</Badge>
+        </div>
+        <div className="form-grid">
+          <label className="field full">
+            <span>Задача для связи</span>
+            <select value={targetTaskId} onChange={(event) => setTargetTaskId(event.target.value)} disabled={!availableTasks.length}>
+              {availableTasks.map((item) => {
+                const counterparty = item.counterpartyId ? getCounterparty(data, item.counterpartyId) : undefined;
+                return (
+                  <option key={item.id} value={item.id}>
+                    {item.id} · {item.title} · {item.status} · {counterparty?.shortName ?? item.counterpartyId ?? 'без клиента'}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <SelectField label="Тип связи" value={relationType} options={taskLinkRelationOptions} onChange={setRelationType} />
+          <div className="process-preview">
+            <strong>{targetTask ? `${targetTask.id}: ${targetTask.title}` : 'Нет доступных задач'}</strong>
+            <p>
+              {targetTask
+                ? `${getTaskAssigneeLabel(data, targetTask)} · срок ${formatDate(targetTask.dueDate)} · ${targetTask.processId ? `процесс ${targetTask.processId}` : 'без процесса'}`
+                : 'Все доступные задачи уже связаны с текущей задачей.'}
+            </p>
+          </div>
+          <TextAreaField className="full" label="Комментарий для истории" value={comment} onChange={setComment} placeholder="Например: задача блокирует закрытие обращения до получения ответа юристов." />
+        </div>
+        <footer className="modal-actions">
+          <Button onClick={onClose}>Отмена</Button>
+          <Button icon={Link2} variant="primary" type="submit" disabled={!targetTaskId}>
+            Связать
+          </Button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 function CommunicationModal({
   data,
   counterparty,
   counterpartyId,
+  preset,
   onClose,
   onCreate
 }: {
   data: AppData;
   counterparty?: Counterparty;
   counterpartyId?: string;
+  preset?: CommunicationPreset;
   onClose: () => void;
   onCreate: (payload: CommunicationFormValues) => void;
 }) {
   const defaultCounterpartyId = counterpartyId ?? data.counterparties[0]?.id ?? '';
+  const initialCounterparty = counterparty ?? getCounterparty(data, defaultCounterpartyId);
+  const initialRequestCategory = getDefaultRequestCategory(initialCounterparty, preset);
+  const initialRouteGroup = getRequestRouteGroup(initialRequestCategory, initialCounterparty);
+  const initialIntent = buildDetectedIntent(initialCounterparty, initialRequestCategory);
   const [form, setForm] = useState<CommunicationFormValues>({
     counterpartyId: defaultCounterpartyId,
-    type: 'Звонок',
-    subject: counterparty ? `Контакт с ${counterparty.shortName}` : 'Контакт с контрагентом',
-    at: '2026-08-06T11:00',
-    status: 'Запланирована',
-    channel: 'Телефон',
+    type: preset ? 'Обращение' : 'Звонок',
+    subject: initialCounterparty
+      ? preset
+        ? `Входящее обращение: ${initialCounterparty.shortName}`
+        : `Контакт с ${initialCounterparty.shortName}`
+      : preset
+        ? 'Входящее обращение'
+        : 'Контакт с контрагентом',
+    at: preset === 'incomingCall' ? '2026-08-04T12:08' : '2026-08-06T11:00',
+    status: preset ? 'Требует follow-up' : 'Запланирована',
+    channel: preset === 'incomingCall' ? 'Телефон' : 'Телефон',
     processId: data.processes.find((process) => process.counterpartyId === defaultCounterpartyId)?.id ?? '',
-    summary: 'Цель коммуникации, ожидаемый результат и рабочий контекст зафиксированы.',
-    nextAction: 'Подтвердить договоренности и назначить ответственного',
-    agenda: 'Контекст обращения или процесса\nРешение и следующий шаг\nСрок ответа и ответственный',
-    participants: counterparty?.contacts.map((contact) => contact.name).join(', ') || '',
+    summary: initialIntent,
+    nextAction: requestNextActionByCategory[initialRequestCategory],
+    agenda: preset
+      ? 'Идентифицировать клиента и контакт\nОпределить суть запроса\nНазначить маршрут и срок ответа'
+      : 'Контекст обращения или процесса\nРешение и следующий шаг\nСрок ответа и ответственный',
+    participants: initialCounterparty?.contacts.map((contact) => contact.name).join(', ') || '',
+    requestCategory: initialRequestCategory,
+    detectedIntent: initialIntent,
+    routeGroup: initialRouteGroup,
+    startAppealProcess: Boolean(preset),
     createTask: true,
-    taskGroup: 'Операционный контроль',
+    taskGroup: initialRouteGroup,
     taskAssigneeId: '',
     taskDueDate: '2026-08-08'
   });
   const processOptions = ['', ...data.processes.filter((process) => process.counterpartyId === form.counterpartyId).map((process) => process.id)];
   const selectedCounterparty = getCounterparty(data, form.counterpartyId);
-  const groupOptions = Array.from(new Set(['Операционный контроль', 'Контактный центр', 'Технологическая интеграция', 'Юридическое сопровождение', 'Партнерские программы', ...data.taskTemplates.map((template) => template.assigneeGroup)])).sort();
+  const groupOptions = Array.from(
+    new Set([
+      'Управление операционного сопровождения',
+      'Центр клиентских коммуникаций',
+      'Управление технологической интеграции',
+      'Юридическое управление',
+      'Управление партнерских программ',
+      ...data.taskTemplates.map((template) => template.assigneeGroup),
+      ...data.users.map((user) => user.department),
+      ...data.counterparties.flatMap((item) => item.departments)
+    ])
+  ).filter(Boolean).sort();
   const taskAssigneeOptions = data.users.filter((user) => user.department === form.taskGroup);
   const updateForm = <K extends keyof CommunicationFormValues>(key: K, value: CommunicationFormValues[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const updateRequestCategory = (value: CommunicationRequestCategory) => {
+    const routeGroup = getRequestRouteGroup(value, selectedCounterparty);
+    setForm((current) => ({
+      ...current,
+      requestCategory: value,
+      routeGroup,
+      taskGroup: routeGroup,
+      taskAssigneeId: data.users.some((user) => user.id === current.taskAssigneeId && user.department === routeGroup) ? current.taskAssigneeId : '',
+      nextAction: requestNextActionByCategory[value],
+      detectedIntent: current.detectedIntent === buildDetectedIntent(selectedCounterparty, current.requestCategory) ? buildDetectedIntent(selectedCounterparty, value) : current.detectedIntent,
+      summary: current.summary === buildDetectedIntent(selectedCounterparty, current.requestCategory) ? buildDetectedIntent(selectedCounterparty, value) : current.summary
+    }));
+  };
   const updateTaskGroup = (value: string) => {
     setForm((current) => ({
       ...current,
       taskGroup: value,
+      routeGroup: value,
       taskAssigneeId: data.users.some((user) => user.id === current.taskAssigneeId && user.department === value) ? current.taskAssigneeId : ''
     }));
   };
@@ -10642,12 +11643,23 @@ function CommunicationModal({
             value={form.counterpartyId}
             onChange={(event) => {
               const nextCounterparty = getCounterparty(data, event.target.value);
+              const nextCategory = getDefaultRequestCategory(nextCounterparty, preset);
+              const nextRouteGroup = getRequestRouteGroup(nextCategory, nextCounterparty);
+              const previousIntent = buildDetectedIntent(selectedCounterparty, form.requestCategory);
+              const nextIntent = buildDetectedIntent(nextCounterparty, nextCategory);
               setForm((current) => ({
                 ...current,
                 counterpartyId: event.target.value,
                 processId: data.processes.find((process) => process.counterpartyId === event.target.value)?.id ?? '',
-                subject: nextCounterparty ? `Контакт с ${nextCounterparty.shortName}` : current.subject,
-                participants: nextCounterparty?.contacts.map((contact) => contact.name).join(', ') ?? current.participants
+                subject: nextCounterparty ? `${preset ? 'Входящее обращение' : 'Контакт'} с ${nextCounterparty.shortName}` : current.subject,
+                participants: nextCounterparty?.contacts.map((contact) => contact.name).join(', ') ?? current.participants,
+                requestCategory: nextCategory,
+                routeGroup: nextRouteGroup,
+                taskGroup: nextRouteGroup,
+                taskAssigneeId: '',
+                nextAction: requestNextActionByCategory[nextCategory],
+                detectedIntent: current.detectedIntent === previousIntent ? nextIntent : current.detectedIntent,
+                summary: current.summary === previousIntent ? nextIntent : current.summary
               }));
             }}
           >
@@ -10658,11 +11670,54 @@ function CommunicationModal({
             ))}
           </select>
         </label>
-        <SelectField label="Тип" value={form.type} options={['Звонок', 'Встреча', 'Письмо', 'Обращение']} onChange={(value) => updateForm('type', value)} />
+        <SelectField
+          label="Тип"
+          value={form.type}
+          options={['Звонок', 'Встреча', 'Письмо', 'Обращение']}
+          onChange={(value) =>
+            setForm((current) => ({
+              ...current,
+              type: value,
+              status: value === 'Обращение' && current.status === 'Запланирована' ? 'Требует follow-up' : current.status,
+              startAppealProcess: value === 'Обращение' ? current.startAppealProcess : false,
+              createTask: value === 'Обращение' ? true : current.createTask
+            }))
+          }
+        />
         <SelectField label="Статус" value={form.status} options={communicationStatuses} onChange={(value) => updateForm('status', value)} />
         <SelectField label="Канал" value={form.channel} options={['Телефон', 'ВКС', 'Email', 'Офис', 'Чат', 'Форма сайта']} onChange={(value) => updateForm('channel', value)} />
         <Field label="Дата и время" value={form.at} onChange={(value) => updateForm('at', value)} type="datetime-local" required />
         <Field label="Тема" value={form.subject} onChange={(value) => updateForm('subject', value)} required className="full" />
+        <div className="service-request-card full">
+          <div className="service-request-head">
+            <strong>Запрос клиента</strong>
+            <Badge tone="cyan">{form.routeGroup}</Badge>
+          </div>
+          <div className="service-request-grid">
+            <SelectField label="Категория запроса" value={form.requestCategory} options={communicationRequestCategories} onChange={updateRequestCategory} />
+            <SelectField label="Маршрут" value={form.routeGroup} options={groupOptions} onChange={(value) => updateTaskGroup(value)} />
+            <label className="field full">
+              <span>Суть запроса</span>
+              <textarea
+                value={form.detectedIntent}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setForm((current) => ({ ...current, detectedIntent: value, summary: current.summary === current.detectedIntent ? value : current.summary }));
+                }}
+              />
+            </label>
+          </div>
+          {form.type === 'Обращение' ? (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={form.startAppealProcess}
+                onChange={(event) => setForm((current) => ({ ...current, startAppealProcess: event.target.checked, createTask: event.target.checked ? true : current.createTask }))}
+              />
+              <span>Запустить процесс обработки обращения</span>
+            </label>
+          ) : null}
+        </div>
         <label className="field full">
           <span>Связанный процесс</span>
           <select value={form.processId ?? ''} onChange={(event) => updateForm('processId', event.target.value)}>
@@ -10684,24 +11739,44 @@ function CommunicationModal({
         </label>
         <Field label="Следующий шаг" value={form.nextAction} onChange={(value) => updateForm('nextAction', value)} required className="full" />
         <label className="check-row full">
-          <input type="checkbox" checked={form.createTask} onChange={(event) => updateForm('createTask', event.target.checked)} />
-          <span>{form.status === 'Запланирована' ? 'Создать задачу на подготовку и проведение' : 'Создать follow-up задачу по итогам'}</span>
+          <input
+            type="checkbox"
+            checked={form.startAppealProcess || form.createTask}
+            disabled={form.startAppealProcess}
+            onChange={(event) => updateForm('createTask', event.target.checked)}
+          />
+          <span>
+            {form.startAppealProcess
+              ? 'Создать первую задачу процесса обращения'
+              : form.status === 'Запланирована'
+                ? 'Создать задачу на подготовку и проведение'
+                : 'Создать follow-up задачу по итогам'}
+          </span>
         </label>
-        {form.createTask ? (
+        {form.createTask || form.startAppealProcess ? (
           <>
-            <SelectField label="Группа задачи" value={form.taskGroup} options={groupOptions} onChange={updateTaskGroup} />
-            <label className="field">
-              <span>Исполнитель задачи</span>
-              <select value={form.taskAssigneeId ?? ''} onChange={(event) => updateForm('taskAssigneeId', event.target.value)}>
-                <option value="">Не выбран - назначить на группу</option>
-                {taskAssigneeOptions.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Field label="Срок задачи" value={form.taskDueDate} onChange={(value) => updateForm('taskDueDate', value)} type="date" />
+            {form.startAppealProcess ? (
+              <div className="process-preview">
+                <strong>Первая задача: Центр клиентских коммуникаций</strong>
+                <p>После классификации следующая задача уйдет по маршруту: {form.routeGroup}.</p>
+              </div>
+            ) : (
+              <>
+                <SelectField label="Группа задачи" value={form.taskGroup} options={groupOptions} onChange={updateTaskGroup} />
+                <label className="field">
+                  <span>Исполнитель задачи</span>
+                  <select value={form.taskAssigneeId ?? ''} onChange={(event) => updateForm('taskAssigneeId', event.target.value)}>
+                    <option value="">Не выбран - назначить на группу</option>
+                    {taskAssigneeOptions.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+            <Field label={form.startAppealProcess ? 'Срок ответа' : 'Срок задачи'} value={form.taskDueDate} onChange={(value) => updateForm('taskDueDate', value)} type="date" />
           </>
         ) : null}
         <div className="process-preview full">
@@ -10732,12 +11807,12 @@ function CommunicationOutcomeModal({
 }) {
   const counterparty = getCounterparty(data, communication?.counterpartyId);
   const process = getProcess(data, communication?.processId);
-  const groupOptions = Array.from(new Set(['Операционный контроль', 'Контактный центр', 'Технологическая интеграция', 'Юридическое сопровождение', 'Партнерские программы', ...data.taskTemplates.map((template) => template.assigneeGroup)])).sort();
+  const groupOptions = Array.from(new Set(['Управление операционного сопровождения', 'Центр клиентских коммуникаций', 'Управление технологической интеграции', 'Юридическое управление', 'Управление партнерских программ', ...data.taskTemplates.map((template) => template.assigneeGroup)])).sort();
   const [outcome, setOutcome] = useState(communication?.outcome ?? (communication?.status === 'Запланирована' ? '' : communication?.summary ?? ''));
   const [nextAction, setNextAction] = useState(communication?.nextAction ?? '');
   const [resultAt, setResultAt] = useState('2026-08-05T14:10');
   const [createTask, setCreateTask] = useState((communication?.linkedTaskIds?.length ?? 0) === 0);
-  const [taskGroup, setTaskGroup] = useState(process?.currentGroup ?? 'Операционный контроль');
+  const [taskGroup, setTaskGroup] = useState(process?.currentGroup ?? 'Управление операционного сопровождения');
   const [taskAssigneeId, setTaskAssigneeId] = useState('');
   const [taskDueDate, setTaskDueDate] = useState(process?.dueDate ?? '2026-08-08');
   const [error, setError] = useState('');
@@ -10853,20 +11928,21 @@ function InternalHandoffModal({
   const departmentOptions = Array.from(
     new Set([
       currentDepartment,
-      'Операционный контроль',
-      'Контактный центр',
-      'Технологическая интеграция',
-      'Юридическое сопровождение',
-      'Партнерские программы',
-      'Администрирование Целевой ИС',
+      'Управление операционного сопровождения',
+      'Центр клиентских коммуникаций',
+      'Управление технологической интеграции',
+      'Юридическое управление',
+      'Управление партнерских программ',
+      'Управление сопровождения корпоративных систем',
       'Офис управления процессами',
       ...data.counterparties.flatMap((item) => item.departments)
     ])
   ).filter(Boolean).sort();
   const [form, setForm] = useState<HandoffFormValues>({
-    title: process ? `Запросить результат по процессу ${process.id}` : 'Запросить результат у подразделения',
-    sourceDepartment: role === 'department' ? currentDepartment : 'Операционный контроль',
-    targetDepartment: process?.currentGroup && process.currentGroup !== currentDepartment ? process.currentGroup : 'Юридическое сопровождение',
+    title: process ? `Запросить результат по процессу ${process.id}` : handoffDefaults['Операционная проверка'].title,
+    requestType: 'Операционная проверка',
+    sourceDepartment: role === 'department' ? currentDepartment : 'Управление операционного сопровождения',
+    targetDepartment: process?.currentGroup && process.currentGroup !== currentDepartment ? process.currentGroup : handoffDefaults['Операционная проверка'].targetDepartment,
     priority: process?.priority ?? 'Средний',
     dueDate: '2026-08-08',
     counterpartyId: defaultCounterpartyId,
@@ -10876,6 +11952,16 @@ function InternalHandoffModal({
     createTask: true
   });
   const updateForm = <K extends keyof HandoffFormValues>(key: K, value: HandoffFormValues[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const updateRequestType = (value: string) => {
+    const defaults = handoffDefaults[value] ?? handoffDefaults['Операционная проверка'];
+    setForm((current) => ({
+      ...current,
+      requestType: value,
+      targetDepartment: defaults.targetDepartment,
+      title: current.title === handoffDefaults[current.requestType]?.title || current.title === `Запросить результат по процессу ${process?.id}` ? defaults.title : current.title,
+      comment: current.comment === handoffDefaults[current.requestType]?.comment || current.comment === 'Нужно подготовить результат и вернуть комментарий инициатору в CRM.' ? defaults.comment : current.comment
+    }));
+  };
   const processOptions = ['', ...data.processes.filter((item) => !form.counterpartyId || item.counterpartyId === form.counterpartyId).map((item) => item.id)];
   const taskOptions = ['', ...data.tasks.filter((task) => !form.processId || task.processId === form.processId).map((task) => task.id)];
 
@@ -10888,7 +11974,8 @@ function InternalHandoffModal({
           onCreate(form);
         }}
       >
-        <Field label="Тема поручения" value={form.title} onChange={(value) => updateForm('title', value)} required className="full" />
+        <SelectField label="Тип запроса" value={form.requestType} options={handoffRequestTypes} onChange={updateRequestType} />
+        <Field label="Тема поручения" value={form.title} onChange={(value) => updateForm('title', value)} required />
         <SelectField label="От подразделения" value={form.sourceDepartment} options={departmentOptions} onChange={(value) => updateForm('sourceDepartment', value)} />
         <SelectField label="Кому" value={form.targetDepartment} options={departmentOptions} onChange={(value) => updateForm('targetDepartment', value)} />
         <SelectField label="Приоритет" value={form.priority} options={priorities} onChange={(value) => updateForm('priority', value)} />
@@ -11084,12 +12171,15 @@ function DocumentUploadModal({
   onClose: () => void;
   onUpload: (payload: DocumentUploadPayload) => void;
 }) {
-  const linkedProcess = linkedObjectType === 'Процесс' ? getProcess(data, linkedObjectId) : undefined;
+  const linkedTask = linkedObjectType === 'Задача' ? getTask(data, linkedObjectId) : undefined;
+  const linkedProcess = linkedObjectType === 'Процесс' ? getProcess(data, linkedObjectId) : linkedTask?.processId ? getProcess(data, linkedTask.processId) : undefined;
   const counterparty =
     linkedObjectType === 'Контрагент'
       ? getCounterparty(data, linkedObjectId)
       : linkedProcess
         ? getCounterparty(data, linkedProcess.counterpartyId)
+        : linkedTask?.counterpartyId
+          ? getCounterparty(data, linkedTask.counterpartyId)
         : undefined;
   const serviceOptions = Array.from(
     new Set([
@@ -11100,17 +12190,19 @@ function DocumentUploadModal({
       'Коммуникация'
     ].filter(Boolean) as string[])
   );
-  const relationLabel = linkedProcess
-    ? `${linkedProcess.id} · ${linkedProcess.title}`
-    : counterparty
+  const relationLabel = linkedTask
+    ? `${linkedTask.id} · ${linkedTask.title}`
+    : linkedProcess
+      ? `${linkedProcess.id} · ${linkedProcess.title}`
+      : counterparty
       ? `${counterparty.shortName} · ${counterparty.id}`
       : `${linkedObjectType}: ${linkedObjectId}`;
   const [file, setFile] = useState<File | null>(null);
   const [businessPurpose, setBusinessPurpose] = useState(
-    linkedProcess ? `Материал по процессу: ${linkedProcess.title}` : `Материал по карточке ${counterparty?.shortName ?? linkedObjectId}`
+    linkedTask ? `Материал по задаче: ${linkedTask.title}` : linkedProcess ? `Материал по процессу: ${linkedProcess.title}` : `Материал по карточке ${counterparty?.shortName ?? linkedObjectId}`
   );
   const [service, setService] = useState(serviceOptions[0] ?? 'Профиль клиента');
-  const [nextAction, setNextAction] = useState(linkedProcess ? 'Проверить материал на текущем этапе процесса' : 'Связать файл с процессом, задачей или коммуникацией');
+  const [nextAction, setNextAction] = useState(linkedTask ? 'Использовать файл при выполнении задачи' : linkedProcess ? 'Проверить материал на текущем этапе процесса' : 'Связать файл с процессом, задачей или коммуникацией');
   const [error, setError] = useState('');
   const maxFileSize = 2 * 1024 * 1024;
 
@@ -11159,7 +12251,13 @@ function DocumentUploadModal({
         <div className="object-mini-header">
           <div>
             <h2>{relationLabel}</h2>
-            <p>{linkedObjectType === 'Процесс' ? 'Файл будет связан с процессом и попадет в карточку контрагента.' : 'Файл будет связан с карточкой контрагента.'}</p>
+            <p>
+              {linkedObjectType === 'Задача'
+                ? 'Файл будет связан с задачей, попадет в связанные материалы и отразится в истории выполнения.'
+                : linkedObjectType === 'Процесс'
+                  ? 'Файл будет связан с процессом и попадет в карточку контрагента.'
+                  : 'Файл будет связан с карточкой контрагента.'}
+            </p>
           </div>
           <Badge tone="blue">{linkedObjectType}</Badge>
         </div>
@@ -11329,7 +12427,7 @@ function getTaskWorkProfile({
         ],
         expectedResult: 'Причина и влияние инцидента описаны, ответственный и следующий контроль назначены.',
         completionEffect: process ? nextEffect : 'После выполнения задача фиксирует решение по сервисному сигналу и остается в истории карточки.',
-        resultPlaceholder: 'Например: инцидент СБП связан с ошибкой тестового endpoint, владелец Технологическая интеграция, обходной сценарий согласован.'
+        resultPlaceholder: 'Например: инцидент СБП связан с ошибкой тестового endpoint, владелец Управление технологической интеграции, обходной сценарий согласован.'
       };
     case 'tt-verify-profile':
       return {
@@ -11731,6 +12829,11 @@ function TaskDetailModal({
   executeTask,
   advanceProcess,
   delegateTask,
+  linkTask,
+  unlinkTasks,
+  saveTaskCommunicationAction,
+  saveTaskRequisitesAction,
+  retryIntegration,
   undoTask,
   navigate,
   openModal
@@ -11743,19 +12846,59 @@ function TaskDetailModal({
   executeTask: (id: string, completedFields: string[], result: string, spentHours: number, complete: boolean, fieldResults?: Record<string, string>) => void;
   advanceProcess: (id: string, allowAutoComplete?: boolean) => void;
   delegateTask: (id: string) => void;
+  linkTask: (id: string) => void;
+  unlinkTasks: (sourceTaskId: string, targetTaskId: string) => void;
+  saveTaskCommunicationAction: (payload: TaskCommunicationActionPayload) => void;
+  saveTaskRequisitesAction: (payload: TaskRequisitesActionPayload) => void;
+  retryIntegration: (id: string) => void;
   undoTask: (id: string) => void;
   navigate: (route: RouteState) => void;
   openModal: (modal: ModalState) => void;
 }) {
   const task = getTask(data, taskId);
+  const taskCounterpartyForDraft = task?.counterpartyId ? getCounterparty(data, task.counterpartyId) : undefined;
+  const taskPrimaryContactId = taskCounterpartyForDraft?.contacts.find((contact) => contact.primary)?.id ?? taskCounterpartyForDraft?.contacts[0]?.id ?? '';
   const completedKey = task?.completedFields.join('|') ?? '';
   const historyKey = task?.history.map((entry) => `${entry.at}:${entry.status ?? ''}:${entry.action}`).join('|') ?? '';
   const autoSpentHours = task ? calculateTaskFactHours(task) : 0;
+  const [workAction, setWorkAction] = useState<'call' | 'requisites' | 'integration' | ''>('');
+  const [callContactId, setCallContactId] = useState(taskPrimaryContactId);
+  const [callResult, setCallResult] = useState('');
+  const [callNextAction, setCallNextAction] = useState('');
+  const [requisiteDraft, setRequisiteDraft] = useState({
+    inn: taskCounterpartyForDraft?.inn ?? '',
+    kpp: taskCounterpartyForDraft?.kpp ?? '',
+    ogrn: taskCounterpartyForDraft?.ogrn ?? '',
+    address: taskCounterpartyForDraft?.address ?? '',
+    identityDocument: taskCounterpartyForDraft?.identityDocument ?? '',
+    loyaltyId: taskCounterpartyForDraft?.loyaltyId ?? '',
+    consentStatus: taskCounterpartyForDraft?.consentStatus ?? 'Получено',
+    preferredChannel: taskCounterpartyForDraft?.preferredChannel ?? 'Телефон'
+  });
+  const [selectedIntegrationId, setSelectedIntegrationId] = useState('');
   const [selectedFields, setSelectedFields] = useState<string[]>(task?.completedFields ?? []);
   const [fieldResults, setFieldResults] = useState<Record<string, string>>({});
   const [result, setResult] = useState('');
   const [spentHours, setSpentHours] = useState(formatHoursInput(autoSpentHours));
   const [decision, setDecision] = useState<'Подтвердить' | 'Запросить данные' | 'Вернуть на доработку' | 'Эскалировать'>('Подтвердить');
+
+  useEffect(() => {
+    setWorkAction('');
+    setCallContactId(taskPrimaryContactId);
+    setCallResult('');
+    setCallNextAction('');
+    setSelectedIntegrationId('');
+    setRequisiteDraft({
+      inn: taskCounterpartyForDraft?.inn ?? '',
+      kpp: taskCounterpartyForDraft?.kpp ?? '',
+      ogrn: taskCounterpartyForDraft?.ogrn ?? '',
+      address: taskCounterpartyForDraft?.address ?? '',
+      identityDocument: taskCounterpartyForDraft?.identityDocument ?? '',
+      loyaltyId: taskCounterpartyForDraft?.loyaltyId ?? '',
+      consentStatus: taskCounterpartyForDraft?.consentStatus ?? 'Получено',
+      preferredChannel: taskCounterpartyForDraft?.preferredChannel ?? 'Телефон'
+    });
+  }, [taskId, taskCounterpartyForDraft?.id, taskPrimaryContactId]);
 
   useEffect(() => {
     const initialFieldResults = Object.fromEntries(
@@ -11794,10 +12937,24 @@ function TaskDetailModal({
       integration.objectId === task.counterpartyId ||
       Boolean(process?.integrationIds.includes(integration.id))
   );
+  const selectedIntegration = relatedIntegrations.find((integration) => integration.id === selectedIntegrationId) ?? relatedIntegrations.find((integration) => integration.status === 'Ошибка') ?? relatedIntegrations[0];
+  const relatedTasks = data.tasks
+    .filter((item) => item.id !== task.id && (task.links.includes(item.id) || item.links.includes(task.id)))
+    .sort((a, b) => {
+      const sameProcessA = a.processId && a.processId === task.processId ? 0 : 1;
+      const sameProcessB = b.processId && b.processId === task.processId ? 0 : 1;
+      return sameProcessA - sameProcessB || new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    });
   const recentCommunications = data.communications
     .filter((communication) => communication.counterpartyId === task.counterpartyId)
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
     .slice(0, 3);
+  const visibleRelatedDocuments = relatedDocuments.slice(0, 2);
+  const visibleRelatedIntegrations = relatedIntegrations.slice(0, Math.max(0, 2 - visibleRelatedDocuments.length));
+  const hiddenRelatedDocuments = relatedDocuments.slice(visibleRelatedDocuments.length);
+  const hiddenRelatedIntegrations = relatedIntegrations.slice(visibleRelatedIntegrations.length);
+  const relatedMaterialCount = relatedDocuments.length + relatedIntegrations.length;
+  const hiddenMaterialCount = hiddenRelatedDocuments.length + hiddenRelatedIntegrations.length;
   const counterpartyRisk = counterparty ? calculateOperationalRisk(counterparty, data) : 0;
   const missingFields = task.requiredFields.filter((field) => !selectedFields.includes(field));
   const daysLeft = daysBetween(task.dueDate);
@@ -11868,11 +13025,80 @@ function TaskDetailModal({
       updateTaskStatus(task.id, 'В работе');
     }
   };
+  const openRelatedDocuments = () => {
+    onClose();
+    navigate(task.processId ? { page: 'process', id: task.processId, tab: 'documents' } : { page: 'counterparty', id: task.counterpartyId, tab: 'documents' });
+  };
+  const renderRelatedDocument = (document: BusinessDocument) => {
+    const documentContext = getDocumentBusinessContext(data, document);
+    return (
+      <button key={document.id} onClick={openRelatedDocuments}>
+        <FileClock size={16} />
+        <span>
+          <strong>{document.name}</strong>
+          <small>{documentContext.service ? `${documentContext.service} · ${document.status}` : `${document.status} · ${document.format}`}</small>
+        </span>
+        <Badge tone={statusTone(document.status)}>{document.status}</Badge>
+      </button>
+    );
+  };
+  const renderRelatedIntegration = (integration: IntegrationExchange) => (
+    <button key={integration.id} onClick={() => openModal({ type: 'integrationLog', id: integration.id })}>
+      <Network size={16} />
+      <span>
+        <strong>{integration.system}</strong>
+        <small>{integration.operation}</small>
+      </span>
+      <Badge tone={statusTone(integration.status)}>{integration.status}</Badge>
+    </button>
+  );
+  const selectedContact = counterparty?.contacts.find((contact) => contact.id === callContactId) ?? counterparty?.contacts[0];
+  const canSaveCall = Boolean(counterparty && callResult.trim());
+  const saveCallAction = () => {
+    if (!counterparty || !canSaveCall) return;
+    saveTaskCommunicationAction({
+      taskId: task.id,
+      counterpartyId: counterparty.id,
+      processId: task.processId,
+      contactId: selectedContact?.id,
+      result: callResult.trim(),
+      nextAction: callNextAction.trim()
+    });
+    setCallResult('');
+    setCallNextAction('');
+    setWorkAction('');
+  };
+  const saveRequisitesAction = () => {
+    if (!counterparty) return;
+    const isIndividual = isIndividualCounterparty(counterparty);
+    const summary = isIndividual
+      ? `Документ: ${requisiteDraft.identityDocument || 'не указан'}, согласие ПДн: ${requisiteDraft.consentStatus}, канал: ${requisiteDraft.preferredChannel}`
+      : `ИНН ${requisiteDraft.inn || 'не указан'}, КПП ${requisiteDraft.kpp || 'не указан'}, ОГРН ${requisiteDraft.ogrn || 'не указан'}`;
+    saveTaskRequisitesAction({
+      taskId: task.id,
+      counterpartyId: counterparty.id,
+      fields: isIndividual
+        ? {
+            identityDocument: requisiteDraft.identityDocument,
+            loyaltyId: requisiteDraft.loyaltyId,
+            consentStatus: requisiteDraft.consentStatus as Counterparty['consentStatus'],
+            preferredChannel: requisiteDraft.preferredChannel as Counterparty['preferredChannel']
+          }
+        : {
+            inn: requisiteDraft.inn,
+            kpp: requisiteDraft.kpp,
+            ogrn: requisiteDraft.ogrn,
+            address: requisiteDraft.address
+          },
+      summary
+    });
+    setWorkAction('');
+  };
 
   return (
     <Modal title={`Задача ${task.id}`} onClose={onClose} width="large">
-      <div className="modal-body">
-        <div className="object-mini-header">
+      <div className="modal-body task-modal-body">
+        <div className="object-mini-header task-detail-header">
           <div>
             <h2>{task.title}</h2>
             <div className="badge-row">
@@ -11881,7 +13107,7 @@ function TaskDetailModal({
               <Badge tone="cyan">{getTaskAssigneeLabel(data, task)}</Badge>
             </div>
           </div>
-          <div className="actions">
+          <div className="actions task-header-actions">
             <Button icon={UsersRound} onClick={() => delegateTask(task.id)} disabled={isClosedTask}>
               Делегировать
             </Button>
@@ -11895,8 +13121,8 @@ function TaskDetailModal({
             ) : null}
           </div>
         </div>
-        <div className="content-layout two-columns">
-          <section>
+        <div className="content-layout two-columns task-detail-layout">
+          <section className="task-main-column">
             <div className="task-workbench-strip">
               <article>
                 <span>Клиент</span>
@@ -11944,29 +13170,34 @@ function TaskDetailModal({
                   ))}
                 </div>
               ) : null}
-              <div className="task-guidance-grid compact">
-                <article>
-                  <h4>Проверить</h4>
-                  {visibleChecks.map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </article>
-                <article>
-                  <h4>Основания</h4>
-                  {visibleEvidence.map((item) => (
-                    <p key={item}>{item}</p>
-                  ))}
-                </article>
-              </div>
               <details className="task-context-details">
-                <summary>Маршрут и основание</summary>
-                <div className="task-context-grid">
-                  <Info label="Источник" value={workProfile.source} />
-                  <Info label="Основание" value={workProfile.trigger} />
-                  <Info label="Контекст" value={counterparty ? `${counterparty.name}. ${counterparty.region}. ${serviceSummary}` : 'Задача без привязки к клиенту'} />
-                  <Info label="Текущий этап" value={currentStage?.name ?? 'нет процесса'} />
-                  <Info label="Следующий этап" value={nextStage?.name ?? (process ? 'Завершение процесса' : 'не применяется')} />
-                  <Info label="Статус процесса" value={process?.status ?? 'без процесса'} />
+                <summary>
+                  <span>Контекст задачи</span>
+                  <Badge tone="neutral">{visibleChecks.length + visibleEvidence.length} пунктов</Badge>
+                </summary>
+                <div className="task-context-body">
+                  <div className="task-guidance-grid compact">
+                    <article>
+                      <h4>Проверить</h4>
+                      {visibleChecks.map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                    <article>
+                      <h4>Основания</h4>
+                      {visibleEvidence.map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </article>
+                  </div>
+                  <div className="task-context-grid">
+                    <Info label="Источник" value={workProfile.source} />
+                    <Info label="Основание" value={workProfile.trigger} />
+                    <Info label="Контекст" value={counterparty ? `${counterparty.name}. ${counterparty.region}. ${serviceSummary}` : 'Задача без привязки к клиенту'} />
+                    <Info label="Текущий этап" value={currentStage?.name ?? 'нет процесса'} />
+                    <Info label="Следующий этап" value={nextStage?.name ?? (process ? 'Завершение процесса' : 'не применяется')} />
+                    <Info label="Статус процесса" value={process?.status ?? 'без процесса'} />
+                  </div>
                 </div>
               </details>
             </div>
@@ -11975,6 +13206,141 @@ function TaskDetailModal({
               <div className="panel-subheader">
                 <h3>Выполнение задачи</h3>
               </div>
+              <div className="task-operation-grid">
+                <button type="button" className={workAction === 'call' ? 'active' : ''} onClick={() => setWorkAction(workAction === 'call' ? '' : 'call')} disabled={!counterparty || isClosedTask}>
+                  <Phone size={17} />
+                  <span>
+                    <strong>Позвонить</strong>
+                    <small>{selectedContact?.name ?? 'контакт не выбран'}</small>
+                  </span>
+                </button>
+                <button type="button" onClick={() => openModal({ type: 'documentUpload', linkedObjectType: 'Задача', linkedObjectId: task.id, returnTaskId: task.id })} disabled={isClosedTask}>
+                  <Upload size={17} />
+                  <span>
+                    <strong>Прикрепить файл</strong>
+                    <small>{relatedDocuments.length ? `${relatedDocuments.length} в задаче` : 'документ, расчет, скриншот'}</small>
+                  </span>
+                </button>
+                <button type="button" className={workAction === 'requisites' ? 'active' : ''} onClick={() => setWorkAction(workAction === 'requisites' ? '' : 'requisites')} disabled={!counterparty || isClosedTask}>
+                  <ClipboardCheck size={17} />
+                  <span>
+                    <strong>Реквизиты</strong>
+                    <small>{counterparty ? (isIndividualCounterparty(counterparty) ? 'документ и согласия' : 'ИНН, КПП, ОГРН') : 'нет клиента'}</small>
+                  </span>
+                </button>
+                <button type="button" className={workAction === 'integration' ? 'active' : ''} onClick={() => setWorkAction(workAction === 'integration' ? '' : 'integration')} disabled={!relatedIntegrations.length}>
+                  <RefreshCw size={17} />
+                  <span>
+                    <strong>Проверить обмен</strong>
+                    <small>{selectedIntegration ? `${selectedIntegration.system}: ${selectedIntegration.status}` : 'нет связанных обменов'}</small>
+                  </span>
+                </button>
+              </div>
+
+              {workAction === 'call' ? (
+                <div className="task-operation-panel">
+                  <div className="panel-subheader compact">
+                    <h3>Фиксация звонка</h3>
+                  </div>
+                  {counterparty?.contacts.length ? (
+                    <label className="field">
+                      <span>Контакт</span>
+                      <select value={callContactId} onChange={(event) => setCallContactId(event.target.value)}>
+                        {counterparty.contacts.map((contact) => (
+                          <option key={contact.id} value={contact.id}>
+                            {contact.name} · {contact.position} · {contact.phone}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="muted-text">В карточке контрагента нет контактов. Звонок будет сохранен без контактного лица.</p>
+                  )}
+                  <label className="field full">
+                    <span>Итог звонка</span>
+                    <textarea value={callResult} onChange={(event) => setCallResult(event.target.value)} placeholder="Что подтвердили, какие данные получены, какие договоренности зафиксированы" />
+                  </label>
+                  <Field className="full" label="Следующий шаг" value={callNextAction} onChange={setCallNextAction} placeholder="Например: направить расчет, дождаться ответа, создать поручение" />
+                  <div className="execution-actions">
+                    <Button icon={Save} variant="primary" onClick={saveCallAction} disabled={!canSaveCall}>
+                      Сохранить звонок
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {workAction === 'requisites' && counterparty ? (
+                <div className="task-operation-panel">
+                  <div className="panel-subheader compact">
+                    <h3>{isIndividualCounterparty(counterparty) ? 'Данные ФЛ' : 'Реквизиты ЮЛ'}</h3>
+                  </div>
+                  {isIndividualCounterparty(counterparty) ? (
+                    <div className="form-grid task-requisites-grid">
+                      <Field label="Документ" value={requisiteDraft.identityDocument} onChange={(value) => setRequisiteDraft((current) => ({ ...current, identityDocument: value }))} />
+                      <Field label="Loyalty ID" value={requisiteDraft.loyaltyId} onChange={(value) => setRequisiteDraft((current) => ({ ...current, loyaltyId: value }))} />
+                      <SelectField label="Согласие ПДн" value={requisiteDraft.consentStatus} options={['Получено', 'Истекает', 'Не получено']} onChange={(value) => setRequisiteDraft((current) => ({ ...current, consentStatus: value }))} />
+                      <SelectField label="Канал связи" value={requisiteDraft.preferredChannel} options={['Телефон', 'Email', 'Чат', 'Офис', 'Форма сайта']} onChange={(value) => setRequisiteDraft((current) => ({ ...current, preferredChannel: value }))} />
+                    </div>
+                  ) : (
+                    <div className="form-grid task-requisites-grid">
+                      <Field label="ИНН" value={requisiteDraft.inn} onChange={(value) => setRequisiteDraft((current) => ({ ...current, inn: value }))} />
+                      <Field label="КПП" value={requisiteDraft.kpp} onChange={(value) => setRequisiteDraft((current) => ({ ...current, kpp: value }))} />
+                      <Field label="ОГРН" value={requisiteDraft.ogrn} onChange={(value) => setRequisiteDraft((current) => ({ ...current, ogrn: value }))} />
+                      <Field className="full" label="Юридический адрес" value={requisiteDraft.address} onChange={(value) => setRequisiteDraft((current) => ({ ...current, address: value }))} />
+                    </div>
+                  )}
+                  <div className="execution-actions">
+                    <Button icon={Save} variant="primary" onClick={saveRequisitesAction}>
+                      Сохранить в карточку
+                    </Button>
+                    <Button icon={Edit} onClick={() => {
+                      onClose();
+                      navigate({ page: 'counterparty', id: counterparty.id, tab: 'profile' });
+                    }}>
+                      Открыть карточку
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {workAction === 'integration' ? (
+                <div className="task-operation-panel">
+                  <div className="panel-subheader compact">
+                    <h3>Проверка обмена</h3>
+                  </div>
+                  <label className="field full">
+                    <span>Связанный обмен</span>
+                    <select value={selectedIntegration?.id ?? ''} onChange={(event) => setSelectedIntegrationId(event.target.value)}>
+                      {relatedIntegrations.map((integration) => (
+                        <option key={integration.id} value={integration.id}>
+                          {integration.id} · {integration.system} · {integration.operation} · {integration.status}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {selectedIntegration ? (
+                    <div className="task-integration-summary">
+                      <Info label="Система" value={selectedIntegration.system} />
+                      <Info label="Операция" value={selectedIntegration.operation} />
+                      <Info label="Последний обмен" value={formatDateTime(selectedIntegration.lastSync)} />
+                      <Info label="Ошибки" value={selectedIntegration.errors.length ? selectedIntegration.errors.join('; ') : 'нет'} />
+                    </div>
+                  ) : null}
+                  <div className="execution-actions">
+                    {selectedIntegration ? (
+                      <>
+                        <Button icon={RefreshCw} variant={selectedIntegration.status === 'Ошибка' ? 'primary' : 'secondary'} onClick={() => retryIntegration(selectedIntegration.id)}>
+                          Повторить обмен
+                        </Button>
+                        <Button icon={Network} onClick={() => openModal({ type: 'integrationLog', id: selectedIntegration.id })}>
+                          Открыть лог
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="execution-checklist">
                 {task.requiredFields.map((field) => {
                   const hasResult = Boolean(String(fieldResults[field] ?? '').trim());
@@ -12052,49 +13418,67 @@ function TaskDetailModal({
               ) : null}
             </div>
           </section>
-          <section>
-            <div className="panel-subheader">
-              <h3>Связанные материалы</h3>
+          <section className="task-side-column">
+            <div className="panel-subheader task-related-header">
+              <h3>Связанные задачи</h3>
+              <Button icon={Link2} onClick={() => linkTask(task.id)} disabled={isClosedTask}>
+                Добавить связь
+              </Button>
             </div>
             <div className="task-related-list">
-              {relatedDocuments.slice(0, 4).map((document) => {
-                const documentContext = getDocumentBusinessContext(data, document);
+              {relatedTasks.map((relatedTask) => {
+                const relation =
+                  task.taskRelations?.find((item) => item.taskId === relatedTask.id) ??
+                  relatedTask.taskRelations?.find((item) => item.taskId === task.id);
                 return (
-                  <button
-                    key={document.id}
-                    onClick={() => {
-                      onClose();
-                      navigate(task.processId ? { page: 'process', id: task.processId, tab: 'documents' } : { page: 'counterparty', id: task.counterpartyId, tab: 'documents' });
-                    }}
-                  >
-                    <FileClock size={16} />
-                    <span>
-                      <strong>{document.name}</strong>
-                      <small>{document.businessPurpose ?? `${document.status} · ${document.format}`}</small>
-                      <small>{documentContext.service ? `${documentContext.service} · ${document.status}` : `${document.status} · ${document.format}`}</small>
-                    </span>
-                  </button>
+                  <div key={relatedTask.id} className="task-related-item">
+                    <button onClick={() => openModal({ type: 'taskDetail', id: relatedTask.id })}>
+                      <ListChecks size={16} />
+                      <span>
+                        <strong>{relatedTask.id}: {relatedTask.title}</strong>
+                        <small>{relation?.relationType ?? 'Прямая связь'} · {getTaskAssigneeLabel(data, relatedTask)} · срок {formatDate(relatedTask.dueDate)}</small>
+                        <small>{relatedTask.processId ? `Процесс ${relatedTask.processId}` : 'Без процесса'}{relatedTask.counterpartyId ? ` · ${getCounterparty(data, relatedTask.counterpartyId)?.shortName ?? relatedTask.counterpartyId}` : ''}</small>
+                      </span>
+                      <Badge tone={statusTone(relatedTask.status)}>{relatedTask.status}</Badge>
+                    </button>
+                    {!isClosedTask ? (
+                      <IconButton title="Снять связь" icon={X} onClick={() => unlinkTasks(task.id, relatedTask.id)} />
+                    ) : null}
+                  </div>
                 );
               })}
-              {relatedIntegrations.slice(0, 3).map((integration) => (
-                <button key={integration.id} onClick={() => openModal({ type: 'integrationLog', id: integration.id })}>
-                  <Network size={16} />
-                  <span>
-                    <strong>{integration.system}</strong>
-                    <small>{integration.operation}</small>
-                  </span>
-                  <Badge tone={statusTone(integration.status)}>{integration.status}</Badge>
-                </button>
-              ))}
-              {!relatedDocuments.length && !relatedIntegrations.length ? <p className="muted-text">Материалы и обмены не привязаны к задаче.</p> : null}
+              {!relatedTasks.length ? <p className="muted-text">Прямо связанные задачи не указаны.</p> : null}
+            </div>
+
+            <div className="panel-subheader task-related-header">
+              <h3>Связанные материалы</h3>
+              <Badge tone="neutral">{relatedMaterialCount}</Badge>
+            </div>
+            <div className="task-related-list compact">
+              {visibleRelatedDocuments.map(renderRelatedDocument)}
+              {visibleRelatedIntegrations.map(renderRelatedIntegration)}
+              {hiddenMaterialCount ? (
+                <details className="task-fold inline">
+                  <summary>
+                    <span>Еще материалы</span>
+                    <Badge tone="neutral">{hiddenMaterialCount}</Badge>
+                  </summary>
+                  <div className="task-related-list task-fold-content">
+                    {hiddenRelatedDocuments.map(renderRelatedDocument)}
+                    {hiddenRelatedIntegrations.map(renderRelatedIntegration)}
+                  </div>
+                </details>
+              ) : null}
+              {!relatedMaterialCount ? <p className="muted-text">Материалы и обмены не привязаны к задаче.</p> : null}
             </div>
 
             {recentCommunications.length ? (
-              <>
-                <div className="panel-subheader">
-                  <h3>Последние коммуникации</h3>
-                </div>
-                <div className="task-related-list">
+              <details className="task-fold">
+                <summary>
+                  <span>Последние коммуникации</span>
+                  <Badge tone="neutral">{recentCommunications.length}</Badge>
+                </summary>
+                <div className="task-related-list task-fold-content">
                   {recentCommunications.map((communication) => (
                     <button
                       key={communication.id}
@@ -12113,7 +13497,7 @@ function TaskDetailModal({
                     </button>
                   ))}
                 </div>
-              </>
+              </details>
             ) : null}
 
             {task.comments.length ? (
@@ -12128,18 +13512,21 @@ function TaskDetailModal({
                 </div>
               </>
             ) : null}
-            <div className="panel-subheader">
-              <h3>История изменений</h3>
-            </div>
-            <div className="timeline dense">
-              {task.history.map((entry, index) => (
-                <article key={index}>
-                  <h3>{entry.action}</h3>
-                  <p>{entry.details}</p>
-                  <small>{formatDateTime(entry.at)} · {getUserName(data, entry.actorId)}</small>
-                </article>
-              ))}
-            </div>
+            <details className="task-fold">
+              <summary>
+                <span>История изменений</span>
+                <Badge tone="neutral">{task.history.length}</Badge>
+              </summary>
+              <div className="timeline dense task-fold-content">
+                {task.history.map((entry, index) => (
+                  <article key={index}>
+                    <h3>{entry.action}</h3>
+                    <p>{entry.details}</p>
+                    <small>{formatDateTime(entry.at)} · {getUserName(data, entry.actorId)}</small>
+                  </article>
+                ))}
+              </div>
+            </details>
           </section>
         </div>
       </div>
@@ -12271,7 +13658,7 @@ function ImportModal({
           status: 'Новая',
           priority: 'Средний',
           counterpartyId: 'ПР-000077',
-          assigneeGroup: 'Операционный контроль',
+          assigneeGroup: 'Управление операционного сопровождения',
           dueDate: '2026-08-07',
           createdAt: '2026-08-04T13:05:00+07:00',
           requiredFields: ['Исправленный файл', 'Проверка дублей'],
