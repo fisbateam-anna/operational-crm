@@ -1919,12 +1919,6 @@ input[type="range"] {
   font-weight: 800;
 }
 
-.task-deadline-overdue {
-  background: var(--red-soft) !important;
-  color: var(--red);
-  font-weight: 800;
-}
-
 .toast-stack {
   position: fixed;
   right: 18px;
@@ -4363,65 +4357,27 @@ tr:hover td {
   gap: 8px;
 }
 
-.execution-checklist article {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
+.execution-checklist label {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   color: var(--text);
 }
 
-.execution-checklist article.done {
+.execution-checklist label.done {
   border-color: rgba(45, 132, 81, 0.28);
   background: var(--green-soft);
 }
 
-.execution-check-head {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.execution-check-head strong {
-  min-width: 0;
-  color: var(--text);
-  font-size: 13px;
-}
-
-.execution-check-state {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--muted);
-}
-
-.execution-checklist article.done .execution-check-state {
-  background: rgba(45, 132, 81, 0.12);
-  color: var(--green);
-}
-
-.execution-checklist textarea {
-  width: 100%;
-  min-height: 58px;
-  resize: vertical;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 9px 10px;
-  background: #fff;
-  color: var(--text);
-  font: inherit;
-  line-height: 1.35;
-}
-
-.execution-checklist textarea:focus {
-  outline: 2px solid rgba(53, 103, 214, 0.18);
-  border-color: rgba(53, 103, 214, 0.42);
+.execution-checklist input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--green);
 }
 
 .task-decision-row {

@@ -130,6 +130,7 @@ export interface Task {
   createdAt: string;
   requiredFields: string[];
   completedFields: string[];
+  fieldResults?: Record<string, string>;
   timeSpentHours: number;
   links: string[];
   comments: string[];
@@ -145,6 +146,35 @@ export interface TaskTemplate {
   requiredFields: string[];
   slaHours: number;
   statusModel: TaskStatus[];
+  attributes?: TaskTemplateAttribute[];
+  requiredByStatusRole?: TaskRequiredRule[];
+  validationRules?: string[];
+  linkRules?: TaskLinkRule[];
+  autoCreateTriggers?: ('Запуск процесса' | 'Переход этапа' | 'Follow-up коммуникации' | 'Контрольная дата' | 'Внутреннее поручение' | 'API')[];
+}
+
+export interface TaskTemplateAttribute {
+  id: string;
+  name: string;
+  type: 'Строка' | 'Число' | 'Дата' | 'Время' | 'Справочник' | 'Множественный выбор' | 'Формула' | 'Да/Нет';
+  required: boolean;
+  source?: string;
+  validationRule?: string;
+}
+
+export interface TaskRequiredRule {
+  id: string;
+  status: TaskStatus;
+  role: RoleKey | 'Любая роль';
+  fields: string[];
+}
+
+export interface TaskLinkRule {
+  id: string;
+  relationType: 'Основание' | 'Блокирует' | 'Зависит от' | 'Порождает' | 'Связанная задача';
+  targetType: 'Контрагент' | 'Процесс' | 'Задача' | 'Документ' | 'Коммуникация' | 'Поручение';
+  required: boolean;
+  description: string;
 }
 
 export type ProcessStatus =
@@ -179,6 +209,42 @@ export interface ProcessTransition {
   role: RoleKey | 'Любая роль';
 }
 
+export type NotificationChannel = 'email' | 'Внутрисистемное';
+
+export type NotificationDeliveryStatus = 'Отправлено' | 'Доставлено' | 'Ошибка' | 'Ожидает';
+
+export type NotificationTriggerKind =
+  | 'Запуск процесса'
+  | 'Переход этапа'
+  | 'Просрочка SLA'
+  | 'Контрольная дата'
+  | 'Follow-up коммуникации'
+  | 'Внутреннее поручение'
+  | 'Ошибка интеграции';
+
+export type NotificationRecipientRule =
+  | 'Группа текущего этапа'
+  | 'Группа следующего этапа'
+  | 'Куратор контрагента'
+  | 'Владелец процесса'
+  | 'Подразделение поручения'
+  | 'Групповой email'
+  | 'Персональный email';
+
+export interface NotificationTemplate {
+  id: string;
+  name: string;
+  trigger: NotificationTriggerKind;
+  channel: NotificationChannel;
+  recipientRule: NotificationRecipientRule;
+  recipientFallback: string;
+  subject: string;
+  body: string;
+  variables: string[];
+  enabled: boolean;
+  deliveryControl: boolean;
+}
+
 export interface ProcessTemplateSnapshot {
   name: string;
   processType?: string;
@@ -194,6 +260,7 @@ export interface ProcessTemplateSnapshot {
   escalationRules?: string[];
   integrationRules: string[];
   errorHandlingRules?: string[];
+  notificationTemplates?: NotificationTemplate[];
 }
 
 export interface ProcessTemplateVersion {
@@ -224,6 +291,7 @@ export interface ProcessTemplate {
   escalationRules?: string[];
   integrationRules: string[];
   errorHandlingRules?: string[];
+  notificationTemplates?: NotificationTemplate[];
   versionHistory?: ProcessTemplateVersion[];
 }
 
@@ -256,6 +324,77 @@ export type DocumentStatus =
   | 'Ошибка'
   | 'Архив';
 
+export type EvdTemplateStatus = 'Черновик' | 'Актуальный' | 'Архивный';
+
+export type EvdAutoCreateTrigger = 'Ручной запуск' | 'Запуск процесса' | 'Переход этапа' | 'Событие ИС' | 'API';
+
+export type EvdApproverRuleKind = 'Жесткое правило' | 'Гибкое правило';
+
+export type EvdApproverType = 'Пользователь' | 'Роль' | 'Подразделение' | 'Выражение';
+
+export type EvdRelationType = 'Основание' | 'Приложение' | 'Версия' | 'Заменяет' | 'Связанный документ';
+
+export interface EvdTemplateAttribute {
+  id: string;
+  name: string;
+  type: DictionaryField['type'];
+  required: boolean;
+  source?: string;
+  formula?: string;
+  requiredInStatuses?: DocumentStatus[];
+  validationRule?: string;
+}
+
+export interface EvdLinkRule {
+  id: string;
+  relationType: EvdRelationType;
+  targetType: 'Процесс' | 'Контрагент' | 'Задача' | 'Документ' | 'ЭВД' | 'Сервис' | 'Договор';
+  required: boolean;
+  description: string;
+}
+
+export interface EvdApprovalStep {
+  id: string;
+  name: string;
+  approverType: EvdApproverType;
+  approverValue: string;
+  ruleKind: EvdApproverRuleKind;
+  condition?: string;
+  slaHours: number;
+  required: boolean;
+}
+
+export interface EvdTemplate {
+  id: string;
+  name: string;
+  status: EvdTemplateStatus;
+  version: number;
+  businessPurpose: string;
+  format: BusinessDocument['format'];
+  autoCreate: boolean;
+  autoCreateTrigger: EvdAutoCreateTrigger;
+  entityTypes: string[];
+  processTypes?: string[];
+  attributes: EvdTemplateAttribute[];
+  linkRules: EvdLinkRule[];
+  approvalRoute: EvdApprovalStep[];
+  hardApproverRules: string[];
+  flexibleApproverRules: string[];
+  validationRules: string[];
+  statusModel: DocumentStatus[];
+  bodyTemplate: string;
+  variables: string[];
+}
+
+export interface EvdApprovalRuntimeStep {
+  id: string;
+  name: string;
+  approver: string;
+  ruleKind: EvdApproverRuleKind;
+  status: 'Ожидает' | 'Согласовано' | 'Отклонено';
+  dueDate: string;
+}
+
 export interface BusinessDocument {
   id: string;
   name: string;
@@ -277,6 +416,12 @@ export interface BusinessDocument {
   nextAction?: string;
   sourceFileName?: string;
   contentDataUrl?: string;
+  evdTemplateId?: string;
+  evdTemplateVersion?: number;
+  evdAttributes?: Record<string, string | number | boolean>;
+  evdApprovalRoute?: EvdApprovalRuntimeStep[];
+  relatedDocumentIds?: string[];
+  relationType?: EvdRelationType;
 }
 
 export type CommunicationStatus = 'Запланирована' | 'Проведена' | 'Требует follow-up' | 'Отменена';
@@ -322,12 +467,16 @@ export interface InternalHandoff {
 
 export interface NotificationEvent {
   id: string;
-  channel: 'email' | 'Внутрисистемное';
-  status: 'Отправлено' | 'Доставлено' | 'Ошибка' | 'Ожидает';
+  channel: NotificationChannel;
+  status: NotificationDeliveryStatus;
   recipient: string;
   trigger: string;
   objectId: string;
   at: string;
+  templateId?: string;
+  subject?: string;
+  body?: string;
+  deliveryDetails?: string;
 }
 
 export interface IntegrationLogEntry {
@@ -338,7 +487,7 @@ export interface IntegrationLogEntry {
 
 export interface IntegrationExchange {
   id: string;
-  system: 'СЭД' | 'BI' | 'Jira' | 'Redmine' | 'Confluence' | 'Телефония' | 'Email Gateway' | 'DWH';
+  system: 'СЭД' | 'BI' | 'Jira' | 'Redmine' | 'Confluence' | 'Телефония' | 'Email Gateway' | 'DWH' | 'API CRM Gateway';
   status: 'Успешно' | 'Ошибка' | 'В процессе' | 'Ожидает';
   lastSync: string;
   objectType: string;
@@ -436,6 +585,7 @@ export interface AppData {
   internalHandoffs: InternalHandoff[];
   notifications: NotificationEvent[];
   integrations: IntegrationExchange[];
+  evdTemplates: EvdTemplate[];
   dictionaries: Dictionary[];
   wiki: WikiPage[];
   auditLogs: AuditLog[];

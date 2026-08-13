@@ -1,6 +1,6 @@
 import { cloneDefaultData } from '../data/mock';
 import { DEMO_DATA_RESET_VERSION } from '../data/resetVersion';
-import type { AppData, RoleKey } from '../types';
+import type { AppData, RoleKey, Task, TaskStatus } from '../types';
 
 const STORAGE_KEY = 'operational-crm-prototype-state-v5';
 const ROLE_KEY = 'operational-crm-prototype-role-v1';
@@ -93,27 +93,125 @@ const normalizeWikiPages = (pages: AppData['wiki'], defaults: AppData['wiki'], f
   });
 };
 
+const normalizeProcessTemplates = (templates: AppData['processTemplates'], defaults: AppData['processTemplates']): AppData['processTemplates'] => {
+  const defaultById = new Map(defaults.map((template) => [template.id, template]));
+
+  return mergeById(templates, defaults).map((template) => {
+    const fallback = defaultById.get(template.id);
+    if (!fallback) return template;
+
+    return {
+      ...fallback,
+      ...template,
+      notificationTemplates: template.notificationTemplates?.length
+        ? mergeById(template.notificationTemplates, fallback.notificationTemplates ?? [])
+        : fallback.notificationTemplates ?? []
+    };
+  });
+};
+
+const normalizeTaskTemplates = (templates: AppData['taskTemplates'], defaults: AppData['taskTemplates']): AppData['taskTemplates'] => {
+  const defaultById = new Map(defaults.map((template) => [template.id, template]));
+
+  return mergeById(templates, defaults).map((template) => {
+    const fallback = defaultById.get(template.id);
+    if (!fallback) return template;
+    if (template.id !== 'tt-control-date-review') return template;
+
+    return {
+      ...template,
+      name: fallback.name,
+      entityType: fallback.entityType,
+      requiredFields: fallback.requiredFields,
+      slaHours: fallback.slaHours,
+      statusModel: fallback.statusModel
+    };
+  });
+};
+
+const normalizeCounterparties = (
+  counterparties: AppData['counterparties'],
+  defaults: AppData['counterparties'],
+  resetStatusIds: Set<string>
+): AppData['counterparties'] => {
+  const defaultById = new Map(defaults.map((counterparty) => [counterparty.id, counterparty]));
+
+  return mergeById(counterparties, defaults).map((counterparty) => {
+    const fallback = defaultById.get(counterparty.id);
+    if (!fallback) return counterparty;
+
+    const shouldReplaceLegacyDate = !counterparty.nextControlDate || counterparty.nextControlDate.startsWith('2026-08-');
+    return {
+      ...counterparty,
+      status: resetStatusIds.has(counterparty.id) ? fallback.status : counterparty.status,
+      nextControlDate: shouldReplaceLegacyDate ? fallback.nextControlDate : counterparty.nextControlDate
+    };
+  });
+};
+
+const inferRealTaskStatus = (task: Task): TaskStatus => {
+  const historical = task.history.find(
+    (entry) => entry.status && !['Просрочена', 'Новая', 'Выполнена', 'Отменена'].includes(entry.status)
+  )?.status;
+  if (historical) return historical;
+
+  const taskText = `${task.title} ${task.comments.join(' ')} ${task.history.map((entry) => `${entry.action} ${entry.details}`).join(' ')}`.toLowerCase();
+  const requiredCount = task.requiredFields.length;
+  const completedCount = task.completedFields.length;
+
+  if (taskText.includes('ожида') || taskText.includes('запрош') || taskText.includes('ответ')) return 'Ожидание';
+  if (requiredCount > 0 && completedCount >= requiredCount) return 'На проверке';
+  if (completedCount > 0) return 'В работе';
+  return 'Назначена';
+};
+
+const normalizeTaskStatuses = (tasks: AppData['tasks']): AppData['tasks'] =>
+  tasks.map((task) => {
+    const hasLegacyOverdueStatus = task.status === 'Просрочена' || task.history.some((entry) => entry.status === 'Просрочена');
+    if (!hasLegacyOverdueStatus) return task;
+
+    const inferredStatus = task.status === 'Просрочена' ? inferRealTaskStatus(task) : task.status;
+    const history = task.history.map((entry) => (entry.status === 'Просрочена' ? { ...entry, status: inferredStatus } : entry));
+    return {
+      ...task,
+      status: inferredStatus,
+      history
+    };
+  });
+
+const isStartupControlDateTask = (task: Task) =>
+  task.templateId === 'tt-control-date-review' &&
+  task.history.some((entry) => `${entry.action} ${entry.details}`.includes('Контрольная дата наступила при открытии CRM'));
+
+const normalizeTaskPortfolio = (tasks: AppData['tasks']): AppData['tasks'] =>
+  normalizeTaskStatuses(tasks.filter((task) => !isStartupControlDateTask(task)));
+
 const migrateData = (data: AppData): AppData => {
   const defaults = cloneDefaultData();
   const fallbackAuthorId = data.users?.[0]?.id ?? defaults.users[0]?.id ?? 'u-001';
   const mergedWiki = mergeById(data.wiki, defaults.wiki);
+  const mergedTasks = mergeById(data.tasks, defaults.tasks);
+  const removedStartupTasks = mergedTasks.filter(isStartupControlDateTask);
+  const removedTaskIds = new Set(removedStartupTasks.map((task) => task.id));
+  const affectedCounterpartyIds = new Set(removedStartupTasks.map((task) => task.counterpartyId).filter((id): id is string => Boolean(id)));
   const migrated: AppData = {
     ...defaults,
     ...data,
     users: mergeById(data.users, defaults.users),
-    counterparties: mergeById(data.counterparties, defaults.counterparties),
-    taskTemplates: mergeById(data.taskTemplates, defaults.taskTemplates),
-    tasks: mergeById(data.tasks, defaults.tasks),
-    processTemplates: mergeById(data.processTemplates, defaults.processTemplates),
+    counterparties: normalizeCounterparties(data.counterparties, defaults.counterparties, affectedCounterpartyIds),
+    taskTemplates: normalizeTaskTemplates(data.taskTemplates, defaults.taskTemplates),
+    tasks: normalizeTaskPortfolio(mergedTasks),
+    processTemplates: normalizeProcessTemplates(data.processTemplates, defaults.processTemplates),
     processes: mergeById(data.processes, defaults.processes),
     documents: mergeById(data.documents, defaults.documents),
     communications: mergeById(data.communications, defaults.communications),
     internalHandoffs: mergeById(data.internalHandoffs, defaults.internalHandoffs),
-    notifications: mergeById(data.notifications, defaults.notifications),
+    notifications: mergeById(data.notifications, defaults.notifications).filter((notification) => !removedTaskIds.has(notification.objectId)),
     integrations: mergeById(data.integrations, defaults.integrations),
+    evdTemplates: mergeById(data.evdTemplates, defaults.evdTemplates),
     dictionaries: mergeById(data.dictionaries, defaults.dictionaries),
     wiki: normalizeWikiPages(mergedWiki, defaults.wiki, fallbackAuthorId),
-    auditLogs: mergeById(data.auditLogs, defaults.auditLogs),
+    auditLogs: mergeById(data.auditLogs, defaults.auditLogs).filter((log) => !removedTaskIds.has(log.objectName) && !removedTaskIds.has(log.objectLink)),
     savedFilters: mergeById(data.savedFilters, defaults.savedFilters)
   };
 
@@ -121,7 +219,7 @@ const migrateData = (data: AppData): AppData => {
 };
 
 const persistData = (data: AppData) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, tasks: normalizeTaskPortfolio(data.tasks) }));
 };
 
 const markResetVersion = () => {
@@ -131,21 +229,26 @@ const markResetVersion = () => {
 export const loadData = (): AppData => {
   const storedResetVersion = localStorage.getItem(RESET_VERSION_KEY);
   if (storedResetVersion !== DEMO_DATA_RESET_VERSION) {
-    const data = cloneDefaultData();
+    const defaultData = cloneDefaultData();
+    const data = { ...defaultData, tasks: normalizeTaskPortfolio(defaultData.tasks) };
     persistData(data);
     markResetVersion();
     return data;
   }
 
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return cloneDefaultData();
+  if (!raw) {
+    const defaultData = cloneDefaultData();
+    return { ...defaultData, tasks: normalizeTaskPortfolio(defaultData.tasks) };
+  }
 
   try {
     const data = migrateData(JSON.parse(raw) as AppData);
     persistData(data);
     return data;
   } catch {
-    return cloneDefaultData();
+    const defaultData = cloneDefaultData();
+    return { ...defaultData, tasks: normalizeTaskPortfolio(defaultData.tasks) };
   }
 };
 
@@ -154,7 +257,8 @@ export const saveData = (data: AppData) => {
 };
 
 export const resetData = () => {
-  const data = cloneDefaultData();
+  const defaultData = cloneDefaultData();
+  const data = { ...defaultData, tasks: normalizeTaskPortfolio(defaultData.tasks) };
   saveData(data);
   markResetVersion();
   return data;
